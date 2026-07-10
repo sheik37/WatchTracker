@@ -1,0 +1,5 @@
+# Android local configuration example (do not commit real local.properties)
+sdk.dir=C\:\\Users\\<you>\\AppData\\Local\\Android\\Sdk
+TMDB_API_KEY=your_tmdb_api_key
+BACKEND_BASE_URL=https://your-backend.example.com/
+
