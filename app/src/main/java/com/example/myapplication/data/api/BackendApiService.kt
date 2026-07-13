@@ -15,13 +15,28 @@ import retrofit2.http.Query
 
 interface BackendApiService {
     @POST("auth/register")
-    suspend fun register(@Body payload: AuthRequestDto): AuthTokenDto
+    suspend fun register(@Body payload: AuthRequestDto): AuthRegisterDto
 
     @POST("auth/login")
     suspend fun login(@Body payload: AuthRequestDto): AuthTokenDto
 
+    @POST("auth/refresh")
+    suspend fun refresh(@Body payload: AuthRefreshDto): AuthTokenDto
+
+    @POST("auth/resend-verification")
+    suspend fun resendVerification(@Body payload: AuthEmailDto): AuthRegisterDto
+
+    @POST("auth/forgot-password")
+    suspend fun forgotPassword(@Body payload: AuthEmailDto): AuthRegisterDto
+
+    @POST("auth/reset-password")
+    suspend fun resetPassword(@Body payload: AuthResetPasswordDto): AuthRegisterDto
+
     @POST("auth/logout")
-    suspend fun logout()
+    suspend fun logout(@Body payload: AuthLogoutDto)
+
+    @GET("auth/me")
+    suspend fun me(): AuthMeDto
 
     @GET("watchlist")
     suspend fun getWatchlist(
@@ -68,17 +83,56 @@ interface BackendApiService {
 
     @PUT("anime-structures")
     suspend fun upsertAnimeStructure(@Body item: BackendAnimeStructureDto): Response<Void>
+
+    @GET("anime-structures/{title}")
+    suspend fun getAnimeStructure(@Path("title") title: String): BackendAnimeStructureOutDto
 }
 
 @JsonClass(generateAdapter = true)
 data class AuthRequestDto(
-    val username: String,
+    val email: String,
+    val password: String,
+    @Json(name = "otp_code") val otpCode: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthEmailDto(
+    val email: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthResetPasswordDto(
+    val token: String,
     val password: String
 )
 
 @JsonClass(generateAdapter = true)
+data class AuthRefreshDto(
+    @Json(name = "refresh_token") val refreshToken: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthLogoutDto(
+    @Json(name = "refresh_token") val refreshToken: String?
+)
+
+@JsonClass(generateAdapter = true)
 data class AuthTokenDto(
-    val token: String
+    val token: String? = null,
+    @Json(name = "access_token") val accessToken: String? = null,
+    @Json(name = "refresh_token") val refreshToken: String? = null,
+    @Json(name = "expires_in_seconds") val expiresInSeconds: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthRegisterDto(
+    val message: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthMeDto(
+    @Json(name = "user_id") val userId: Int,
+    val email: String
 )
 
 @JsonClass(generateAdapter = true)
@@ -123,6 +177,12 @@ data class BackendAnimeStructureDto(
     val season: String? = null,
     @Json(name = "season_year") val seasonYear: Int? = null,
     val seasons: List<BackendAnimeStructureSeasonDto> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class BackendAnimeStructureOutDto(
+    @Json(name = "normalized_title") val normalizedTitle: String,
+    @Json(name = "payload_json") val payloadJson: BackendAnimeStructureDto
 )
 
 @JsonClass(generateAdapter = true)

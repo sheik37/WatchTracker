@@ -2,8 +2,13 @@ package com.example.myapplication.data.repository
 
 import android.util.Log
 import com.example.myapplication.data.api.AniListClient
+import com.example.myapplication.data.api.AuthEmailDto
+import com.example.myapplication.data.api.AuthLogoutDto
+import com.example.myapplication.data.api.AuthRefreshDto
 import com.example.myapplication.data.api.AuthRequestDto
+import com.example.myapplication.data.api.AuthResetPasswordDto
 import com.example.myapplication.data.api.BackendApiService
+import com.example.myapplication.data.api.AuthMeDto
 import com.example.myapplication.data.api.BackendAnimeStructureDto
 import com.example.myapplication.data.api.BackendAnimeStructureSeasonDto
 import com.example.myapplication.data.api.RemoteEpisodeProgressDto
@@ -39,6 +44,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import okhttp3.OkHttpClient
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
@@ -48,6 +54,17 @@ class MediaRepository(
     private val mediaDao: MediaDao,
     private val animeStructureDao: AnimeStructureDao
 ) {
+    data class AuthTokens(
+        val accessToken: String,
+        val refreshToken: String?,
+        val expiresInSeconds: Int
+    )
+
+    data class UserProfile(
+        val userId: Int,
+        val email: String
+    )
+
     private val structureJson = Json {
         ignoreUnknownKeys = true
     }
@@ -61,6 +78,8 @@ class MediaRepository(
     private var backendBaseUrl: String? = null
     @Volatile
     private var backendAuthToken: String? = null
+    @Volatile
+    private var lastBackendSyncAtMillis: Long = 0L
 
     @Synchronized
     fun setBackendBaseUrl(baseUrl: String?) {
@@ -79,18 +98,65 @@ class MediaRepository(
         rebuildBackendApiService()
     }
 
-    suspend fun register(username: String, password: String): String {
+    suspend fun register(email: String, password: String): String {
         val backend = backendApiService ?: error("Backend API URL is not configured")
-        return backend.register(AuthRequestDto(username = username, password = password)).token
+        return backend.register(AuthRequestDto(email = email, password = password)).message
     }
 
-    suspend fun login(username: String, password: String): String {
+    suspend fun login(email: String, password: String, otpCode: String?): AuthTokens {
         val backend = backendApiService ?: error("Backend API URL is not configured")
-        return backend.login(AuthRequestDto(username = username, password = password)).token
+        val response = backend.login(
+            AuthRequestDto(
+                email = email,
+                password = password,
+                otpCode = otpCode?.trim()?.takeIf { it.isNotBlank() }
+            )
+        )
+        val accessToken = response.accessToken ?: response.token ?: error("Missing access token in login response")
+        return AuthTokens(
+            accessToken = accessToken,
+            refreshToken = response.refreshToken,
+            expiresInSeconds = response.expiresInSeconds ?: 3600
+        )
     }
 
-    suspend fun logout() {
-        backendApiService?.logout()
+    suspend fun refresh(refreshToken: String): AuthTokens {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        val response = backend.refresh(AuthRefreshDto(refreshToken = refreshToken))
+        val accessToken = response.accessToken ?: response.token ?: error("Missing access token in refresh response")
+        return AuthTokens(
+            accessToken = accessToken,
+            refreshToken = response.refreshToken,
+            expiresInSeconds = response.expiresInSeconds ?: 3600
+        )
+    }
+
+    suspend fun resendVerification(email: String): String {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        return backend.resendVerification(AuthEmailDto(email = email)).message
+    }
+
+    suspend fun forgotPassword(email: String): String {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        return backend.forgotPassword(AuthEmailDto(email = email)).message
+    }
+
+    suspend fun resetPassword(token: String, password: String): String {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        return backend.resetPassword(AuthResetPasswordDto(token = token, password = password)).message
+    }
+
+    suspend fun logout(refreshToken: String?) {
+        backendApiService?.logout(AuthLogoutDto(refreshToken = refreshToken))
+    }
+
+    suspend fun getCurrentUserProfile(): UserProfile? {
+        val backend = backendApiService ?: return null
+        val profile: AuthMeDto = backend.me()
+        return UserProfile(
+            userId = profile.userId,
+            email = profile.email
+        )
     }
 
     @Synchronized
@@ -143,8 +209,18 @@ class MediaRepository(
 
     suspend fun synchronizeWithBackend() {
         val backend = backendApiService ?: return
-        syncAnimeStructuresToBackend(backend)
+        val now = System.currentTimeMillis()
+        if ((now - lastBackendSyncAtMillis) < BACKEND_SYNC_MIN_INTERVAL_MILLIS) {
+            return
+        }
+        lastBackendSyncAtMillis = now
         syncWatchlistAndProgress(backend)
+    }
+
+    suspend fun clearLocalSessionData() {
+        mediaDao.clearWatchlist()
+        mediaDao.clearAllEpisodeProgress()
+        lastBackendSyncAtMillis = 0L
     }
 
     fun getWatchlist(category: WatchCategory) = mediaDao.getWatchlist(category.value).map { entities ->
@@ -259,6 +335,7 @@ class MediaRepository(
 
         if (details.watchCategory() == WatchCategory.ANIME) {
             val manualStructure = loadManualAnimeStructure(details)
+            ensureAnimeStructureOnBackend(details, manualStructure)
             manualStructure?.let { structure ->
                 val regularEpisodes = fetchAllRegularSeasonEpisodes(id)
                 if (regularEpisodes.isNotEmpty()) {
@@ -518,17 +595,26 @@ class MediaRepository(
         genreLists.flatten().toSet()
     }
 
-    private suspend fun syncAnimeStructuresToBackend(backend: BackendApiService) {
-        val entities = animeStructureDao.getAll()
-        if (entities.isEmpty()) return
-
-        entities.forEach { entity ->
-            val seed = runCatching {
-                structureJson.decodeFromString(AnimeStructureSeed.serializer(), entity.payloadJson)
-            }.getOrNull() ?: return@forEach
-            runBackendSync("syncAnimeStructuresToBackend") {
-                backend.upsertAnimeStructure(seed.toBackendDto())
+    private suspend fun ensureAnimeStructureOnBackend(details: MediaDetails, localStructure: AnimeStructure?) {
+        val backend = backendApiService ?: return
+        val title = details.title.trim()
+        if (title.isBlank()) return
+        val existsOnBackend = runCatching {
+            backend.getAnimeStructure(title)
+            true
+        }.getOrElse { error ->
+            if (error is HttpException && error.code() == 404) {
+                false
+            } else {
+                Log.w(TAG, "Failed to check anime structure on backend", error)
+                return
             }
+        }
+        if (existsOnBackend) return
+
+        val structure = localStructure ?: return
+        runBackendSync("ensureAnimeStructureOnBackend") {
+            backend.upsertAnimeStructure(structure.toBackendDto())
         }
     }
 
@@ -538,6 +624,13 @@ class MediaRepository(
             return
         }
         val remoteWatchlist = snapshot.watchlist
+        val remoteWatchlistByKey = remoteWatchlist.associateBy {
+            WatchlistItemKey(
+                id = it.id,
+                mediaType = it.mediaType,
+                contentCategory = it.contentCategory
+            )
+        }
         val remoteProgressByMediaId = snapshot.episodeProgress
             .mapNotNull { item ->
                 val mediaId = item.mediaId ?: return@mapNotNull null
@@ -570,12 +663,28 @@ class MediaRepository(
             }
         }
 
-        mergedWatchlist.forEach { entity ->
-            runBackendSync("syncWatchlistAndProgress") {
-                backend.upsertWatchlist(entity.toRemoteDto())
+        mergedWatchlist
+            .map { it.toRemoteDto() }
+            .filter { localItem ->
+                val key = WatchlistItemKey(
+                    id = localItem.id,
+                    mediaType = localItem.mediaType,
+                    contentCategory = localItem.contentCategory
+                )
+                val remoteItem = remoteWatchlistByKey[key]
+                remoteItem == null || !remoteItem.matches(localItem)
             }
-        }
+            .forEach { changedItem ->
+                runBackendSync("syncWatchlistAndProgress") {
+                    backend.upsertWatchlist(changedItem)
+                }
+            }
+
         mergedProgressByMediaId.forEach { (mediaId, progressEntities) ->
+            val remoteProgress = remoteProgressByMediaId[mediaId].orEmpty()
+            if (progressEntities.matchesRemote(remoteProgress)) {
+                return@forEach
+            }
             runBackendSync("syncWatchlistAndProgress") {
                 backend.replaceEpisodeProgress(
                     mediaId,
@@ -659,6 +768,39 @@ class MediaRepository(
         )
     }
 
+    private fun AnimeStructure.toBackendDto(): BackendAnimeStructureDto {
+        return BackendAnimeStructureDto(
+            title = title,
+            aliases = aliases,
+            season = season,
+            seasonYear = seasonYear,
+            seasons = seasons.map { seasonRange ->
+                BackendAnimeStructureSeasonDto(
+                    seasonNumber = seasonRange.seasonNumber,
+                    name = seasonRange.name,
+                    startEpisode = seasonRange.startEpisode,
+                    endEpisode = seasonRange.endEpisode
+                )
+            }
+        )
+    }
+
+    private fun RemoteWatchlistItemDto.matches(other: RemoteWatchlistItemDto): Boolean {
+        return id == other.id &&
+            title == other.title &&
+            posterPath == other.posterPath &&
+            mediaType == other.mediaType &&
+            contentCategory == other.contentCategory &&
+            contentStatus == other.contentStatus &&
+            totalEpisodes == other.totalEpisodes
+    }
+
+    private fun List<EpisodeProgressEntity>.matchesRemote(remote: List<RemoteEpisodeProgressDto>): Boolean {
+        val localSet = map { Triple(it.seasonNumber, it.episodeNumber, it.isWatched) }.toSet()
+        val remoteSet = remote.map { Triple(it.seasonNumber, it.episodeNumber, it.isWatched) }.toSet()
+        return localSet == remoteSet
+    }
+
     private suspend fun runBackendSync(operation: String, block: suspend () -> Unit) {
         if (backendApiService == null) return
         try {
@@ -692,6 +834,7 @@ class MediaRepository(
 
     private companion object {
         const val SEASON_SPLIT_DAYS = 70L
+        const val BACKEND_SYNC_MIN_INTERVAL_MILLIS = 60_000L
         const val TAG = "MediaRepository"
     }
 }
