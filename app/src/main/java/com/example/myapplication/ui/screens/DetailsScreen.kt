@@ -11,17 +11,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -36,6 +43,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,20 +61,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.min
 import coil.compose.AsyncImage
 import com.example.myapplication.data.model.Episode
 import com.example.myapplication.data.model.MediaDetails
 import com.example.myapplication.data.model.MediaType
 import com.example.myapplication.data.model.Season
+import com.example.myapplication.data.model.WatchCategory
 import com.example.myapplication.data.model.WatchStatus
 import com.example.myapplication.data.model.TvStatus
+import com.example.myapplication.data.model.watchCategory
 import kotlinx.coroutines.launch
 import androidx.compose.ui.window.Dialog
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,18 +96,30 @@ fun DetailsScreen(
     val details by viewModel.details.collectAsState()
     val isInWatchlist by viewModel.isInWatchlist.collectAsState()
     val watchStatus by viewModel.watchStatus.collectAsState()
+    val movieWatchedAtMillis by viewModel.movieWatchedAtMillis.collectAsState()
     val watchedEpisodes by viewModel.watchedEpisodes.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val listState = rememberLazyListState()
     var showMenu by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf(false) }
+    var tvSection by remember(id, typeString) { mutableStateOf(TvDetailsSection.ABOUT) }
 
     LaunchedEffect(id, type) {
         viewModel.loadDetails(id, type)
     }
 
     Scaffold(
-        topBar = {}
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {},
+        bottomBar = {
+            val media = details
+            if (media != null && !isInWatchlist) {
+                AddToWatchlistBottomBar(
+                    media = media,
+                    onAddClick = { viewModel.toggleWatchlist() }
+                )
+            }
+        }
     ) { padding ->
         if (isLoading && details == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -100,20 +129,38 @@ fun DetailsScreen(
             details?.let { media ->
                 val orderedSeasons = remember(media.seasons) { orderSeasons(media.seasons) }
                 val seasonOffsets = remember(orderedSeasons) { buildSeasonOffsets(orderedSeasons) }
+                val mediaCategory = remember(media) { media.watchCategory() }
                 Box(Modifier.fillMaxSize()) {
                     val density = LocalDensity.current
-                    val compactHeaderStartPx = with(density) { 320.dp.toPx() }
-                    val compactHeaderEndPx = with(density) { 420.dp.toPx() }
-                    val compactHeaderAlpha by remember(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+                    val tvTabsHeight = if (media.mediaType == MediaType.TV) 48.dp else 0.dp
+                    val statusBarInsetDp = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+                    val headerMaxHeight = 210.dp + statusBarInsetDp
+                    val headerMinHeight = 59.dp + statusBarInsetDp
+                    val headerCollapseRangePx = with(density) { (headerMaxHeight - headerMinHeight).toPx() }
+                    val headerOffsetPx by remember(
+                        listState.firstVisibleItemIndex,
+                        listState.firstVisibleItemScrollOffset,
+                        headerCollapseRangePx
+                    ) {
                         derivedStateOf {
-                            when {
-                                listState.firstVisibleItemIndex > 0 -> 1f
-                                compactHeaderEndPx <= compactHeaderStartPx -> 0f
-                                listState.firstVisibleItemScrollOffset <= compactHeaderStartPx -> 0f
-                                else -> ((listState.firstVisibleItemScrollOffset - compactHeaderStartPx) / (compactHeaderEndPx - compactHeaderStartPx))
-                                    .coerceIn(0f, 1f)
+                            if (listState.firstVisibleItemIndex > 0) {
+                                headerCollapseRangePx
+                            } else {
+                                min(listState.firstVisibleItemScrollOffset.toFloat(), headerCollapseRangePx)
                             }
                         }
+                    }
+                    val headerOffsetDp = with(density) { headerOffsetPx.toDp() }
+                    val collapseProgress = if (headerCollapseRangePx <= 0f) 1f else (headerOffsetPx / headerCollapseRangePx).coerceIn(0f, 1f)
+                    val centeredTitleAlpha = ((collapseProgress - 0.75f) / 0.25f).coerceIn(0f, 1f)
+                    val bottomHeaderAlpha = (1f - centeredTitleAlpha).coerceIn(0f, 1f)
+                    val headerProgressState = remember(media, isInWatchlist, watchStatus, watchedEpisodes) {
+                        detailsHeaderProgressState(
+                            media = media,
+                            isInWatchlist = isInWatchlist,
+                            watchStatus = watchStatus,
+                            watchedEpisodes = watchedEpisodes
+                        )
                     }
 
                     LazyColumn(
@@ -123,64 +170,76 @@ fun DetailsScreen(
                             .padding(padding)
                     ) {
                         item {
-                            MediaHeader(
-                                media = media,
-                                onBackClick = onBackClick,
-                                isInWatchlist = isInWatchlist,
-                                showMenu = showMenu,
-                                onMenuClick = { showMenu = true },
-                                onDismissMenu = { showMenu = false },
-                                onPrimaryAction = {
-                                    showMenu = false
-                                    if (isInWatchlist) {
-                                        showRemoveDialog = true
-                                    } else {
-                                        viewModel.toggleWatchlist()
-                                    }
-                                }
-                            )
+                            Spacer(modifier = Modifier.height(headerMaxHeight + tvTabsHeight))
                         }
-                        item { MediaOverview(media) }
                         if (media.mediaType == MediaType.TV) {
-                            items(orderedSeasons, key = { it.seasonNumber }) { season ->
-                                SeasonSection(
-                                    season = season,
-                                    viewModel = viewModel,
-                                    watchedEpisodes = watchedEpisodes,
-                                    seasonOffset = seasonOffsets[season.seasonNumber] ?: 0,
-                                    isSpecialSeason = season.seasonNumber == 0
+                            if (tvSection == TvDetailsSection.ABOUT) {
+                                item {
+                                    TvAboutSection(
+                                        media = media,
+                                        category = mediaCategory
+                                    )
+                                }
+                            } else {
+                                items(orderedSeasons, key = { it.seasonNumber }) { season ->
+                                    SeasonSection(
+                                        season = season,
+                                        viewModel = viewModel,
+                                        watchedEpisodes = watchedEpisodes,
+                                        seasonOffset = seasonOffsets[season.seasonNumber] ?: 0,
+                                        isSpecialSeason = season.seasonNumber == 0
+                                    )
+                                }
+                            }
+                        } else {
+                            item {
+                                MovieInfoStrip(
+                                    releaseDate = media.releaseDate,
+                                    isWatched = watchStatus == WatchStatus.WATCHED,
+                                    watchedAtMillis = movieWatchedAtMillis,
+                                    onWatchedChange = { checked -> viewModel.setMovieWatched(checked) }
                                 )
                             }
+                            item { MediaOverview(media) }
                         }
                     }
 
-                    if (compactHeaderAlpha > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(72.dp)
-                                .padding(padding)
-                                .background(Color.Transparent)
-                        ) {
-                            CompactStickyHeader(
-                                media = media,
-                                onBackClick = onBackClick,
-                                isInWatchlist = isInWatchlist,
-                                alpha = compactHeaderAlpha,
-                                showMenu = showMenu,
-                                onMenuClick = { showMenu = true },
-                                onDismissMenu = { showMenu = false },
-                                onPrimaryAction = {
-                                    showMenu = false
-                                    if (isInWatchlist) {
-                                        showRemoveDialog = true
-                                    } else {
-                                        viewModel.toggleWatchlist()
-                                    }
-                                }
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(y = -headerOffsetDp)
+                    ) {
+                        MediaHeader(
+                            media = media,
+                            headerHeight = headerMaxHeight,
+                            contentAlpha = bottomHeaderAlpha,
+                            progressState = headerProgressState
+                        )
+                        if (media.mediaType == MediaType.TV) {
+                            TvDetailsTabs(
+                                selected = tvSection,
+                                onSelectedChange = { tvSection = it }
                             )
                         }
                     }
+
+                    DetailsTopActions(
+                        title = media.title,
+                        centeredTitleAlpha = centeredTitleAlpha,
+                        onBackClick = onBackClick,
+                        isInWatchlist = isInWatchlist,
+                        showMenu = showMenu,
+                        onMenuClick = { showMenu = true },
+                        onDismissMenu = { showMenu = false },
+                        onPrimaryAction = {
+                            showMenu = false
+                            if (isInWatchlist) {
+                                showRemoveDialog = true
+                            } else {
+                                viewModel.toggleWatchlist()
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -205,19 +264,143 @@ fun DetailsScreen(
 }
 
 @Composable
-fun MediaHeader(
+private fun AddToWatchlistBottomBar(
     media: MediaDetails,
-    onBackClick: () -> Unit,
-    isInWatchlist: Boolean,
-    showMenu: Boolean,
-    onMenuClick: () -> Unit,
-    onDismissMenu: () -> Unit,
-    onPrimaryAction: () -> Unit
+    onAddClick: () -> Unit
 ) {
+    val label = when (media.watchCategory()) {
+        WatchCategory.FILMS -> "le film"
+        WatchCategory.ANIME -> "l'animé"
+        WatchCategory.SERIES -> "la série"
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(420.dp)
+            .navigationBarsPadding()
+            .background(Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(59.dp)
+                .background(Color(0xFFFFD400))
+                .clickable(onClick = onAddClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "+ Ajouter $label",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black.copy(alpha = 0.78f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvDetailsTabs(
+    selected: TvDetailsSection,
+    onSelectedChange: (TvDetailsSection) -> Unit
+) {
+    TabRow(
+        selectedTabIndex = selected.ordinal,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.42f))
+    ) {
+        Tab(
+            selected = selected == TvDetailsSection.ABOUT,
+            onClick = { onSelectedChange(TvDetailsSection.ABOUT) },
+            text = { Text("À propos") }
+        )
+        Tab(
+            selected = selected == TvDetailsSection.EPISODES,
+            onClick = { onSelectedChange(TvDetailsSection.EPISODES) },
+            text = { Text("Épisodes") }
+        )
+    }
+}
+
+@Composable
+private fun TvAboutSection(
+    media: MediaDetails,
+    category: WatchCategory
+) {
+    val label = if (category == WatchCategory.ANIME) "l'animé" else "la série"
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text(
+            text = "Informations sur $label",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = media.overview.ifBlank { "Aucun synopsis disponible." },
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun MovieInfoStrip(
+    releaseDate: String?,
+    isWatched: Boolean,
+    watchedAtMillis: Long?,
+    onWatchedChange: (Boolean) -> Unit
+) {
+    val releaseLabel = releaseDate?.let { formatIsoDate(it) } ?: "Date inconnue"
+    val watchedLabel = if (isWatched) {
+        watchedAtMillis?.let { formatMillisDate(it) } ?: "Vu"
+    } else {
+        "Pas vu"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CalendarMonth,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(releaseLabel, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.size(12.dp))
+            Icon(
+                imageVector = Icons.Rounded.Visibility,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(watchedLabel, style = MaterialTheme.typography.bodyMedium)
+        }
+        Checkbox(
+            checked = isWatched,
+            onCheckedChange = onWatchedChange
+        )
+    }
+}
+
+@Composable
+private fun MediaHeader(
+    media: MediaDetails,
+    headerHeight: Dp,
+    contentAlpha: Float,
+    progressState: DetailsHeaderProgressState?,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(headerHeight)
     ) {
         AsyncImage(
             model = media.backdropPath ?: media.posterPath,
@@ -235,82 +418,46 @@ fun MediaHeader(
                     )
                 )
         )
-        IconButton(
-            onClick = onBackClick,
-            modifier = Modifier.align(Alignment.TopStart)
-        ) {
-            Icon(
-                Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Retour",
-                tint = Color.White
-            )
-        }
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(4.dp)
-        ) {
-            IconButton(onClick = onMenuClick) {
-                Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = "Options",
-                    tint = Color.White
-                )
-            }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = onDismissMenu
-            ) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            if (isInWatchlist) {
-                                when (media.mediaType) {
-                                    MediaType.MOVIE -> "Supprimer le film"
-                                    else -> "Supprimer la série"
-                                }
-                            } else {
-                                when (media.mediaType) {
-                                    MediaType.MOVIE -> "Ajouter le film"
-                                    else -> "Suivre la série"
-                                }
-                            }
-                        )
-                    },
-                    onClick = {
-                        onDismissMenu()
-                        onPrimaryAction()
-                    }
-                )
-            }
-        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text = media.title,
                 style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
+                color = Color.White.copy(alpha = contentAlpha),
                 fontWeight = FontWeight.Bold
             )
-            if (media.mediaType == MediaType.TV) {
+            if (media.mediaType == MediaType.TV && contentAlpha > 0.02f) {
             SeriesHeaderSubtitle(
                 seasonCount = media.seasons.count { it.seasonNumber != 0 },
-                status = media.tvStatus
+                status = media.tvStatus,
+                alpha = contentAlpha
             )
             }
+        }
+        if (progressState != null) {
+            LinearProgressIndicator(
+                progress = { progressState.progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .align(Alignment.BottomCenter),
+                color = progressState.color,
+                trackColor = Color.Black.copy(alpha = 0.35f)
+            )
         }
     }
 }
 
 @Composable
-fun CompactStickyHeader(
-    media: MediaDetails,
+private fun DetailsTopActions(
+    title: String,
+    centeredTitleAlpha: Float,
     onBackClick: () -> Unit,
     isInWatchlist: Boolean,
-    alpha: Float,
     showMenu: Boolean,
     onMenuClick: () -> Unit,
     onDismissMenu: () -> Unit,
@@ -319,86 +466,67 @@ fun CompactStickyHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(96.dp)
-            .background(Color.Black.copy(alpha = 0.05f))
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
-        AsyncImage(
-            model = media.backdropPath ?: media.posterPath,
-            contentDescription = null,
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(0.dp),
-            contentScale = ContentScale.Crop
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Black.copy(alpha = 0.10f * alpha),
-                            Color.Black.copy(alpha = 0.40f * alpha)
-                        )
-                    )
-                )
-        )
-        IconButton(
-            onClick = onBackClick,
-            modifier = Modifier.align(Alignment.CenterStart)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Retour",
-                tint = Color.White.copy(alpha = alpha)
-            )
-        }
-        Text(
-            text = media.title,
-            modifier = Modifier.align(Alignment.Center),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = alpha),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 4.dp)
-        ) {
-            IconButton(onClick = onMenuClick) {
+            IconButton(onClick = onBackClick) {
                 Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = "Options",
-                    tint = Color.White.copy(alpha = alpha)
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Retour",
+                    tint = Color.White
                 )
             }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = onDismissMenu
+            Box(
+                modifier = Modifier
+                    .padding(end = 4.dp)
             ) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            if (isInWatchlist) {
-                                when (media.mediaType) {
-                                    MediaType.MOVIE -> "Supprimer le film"
-                                    else -> "Supprimer la série"
+                IconButton(onClick = onMenuClick) {
+                    Icon(
+                        Icons.Rounded.MoreVert,
+                        contentDescription = "Options",
+                        tint = Color.White
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = onDismissMenu
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (isInWatchlist) {
+                                    "Retirer des suivis"
+                                } else {
+                                    "Ajouter aux suivis"
                                 }
-                            } else {
-                                when (media.mediaType) {
-                                    MediaType.MOVIE -> "Ajouter le film"
-                                    else -> "Suivre la série"
-                                }
-                            }
-                        )
-                    },
-                    onClick = {
-                        onDismissMenu()
-                        onPrimaryAction()
-                    }
-                )
+                            )
+                        },
+                        onClick = {
+                            onDismissMenu()
+                            onPrimaryAction()
+                        }
+                    )
+                }
             }
+        }
+        if (centeredTitleAlpha > 0f) {
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 64.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White.copy(alpha = centeredTitleAlpha),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -406,19 +534,20 @@ fun CompactStickyHeader(
 @Composable
 private fun SeriesHeaderSubtitle(
     seasonCount: Int,
-    status: TvStatus?
+    status: TvStatus?,
+    alpha: Float
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = if (seasonCount <= 1) "1 saison" else "$seasonCount saisons",
             style = MaterialTheme.typography.bodyLarge,
-            color = Color.White.copy(alpha = 0.85f)
+            color = Color.White.copy(alpha = 0.85f * alpha)
         )
         if (status != null) {
             Text(
                 text = "•",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.85f),
+                color = Color.White.copy(alpha = 0.85f * alpha),
                 modifier = Modifier.padding(horizontal = 8.dp),
                 fontSize = 18.sp,
                 lineHeight = 18.sp
@@ -426,10 +555,53 @@ private fun SeriesHeaderSubtitle(
             Text(
                 text = status.label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.85f)
+                color = Color.White.copy(alpha = 0.85f * alpha)
             )
         }
     }
+}
+
+private data class DetailsHeaderProgressState(val progress: Float, val color: Color)
+private enum class TvDetailsSection { ABOUT, EPISODES }
+
+private fun detailsHeaderProgressState(
+    media: MediaDetails,
+    isInWatchlist: Boolean,
+    watchStatus: WatchStatus?,
+    watchedEpisodes: Set<String>
+): DetailsHeaderProgressState? {
+    if (!isInWatchlist || media.mediaType != MediaType.TV) return null
+    val status = watchStatus ?: return null
+    if (status == WatchStatus.NOT_STARTED || status == WatchStatus.NOT_WATCHED) return null
+
+    return when (status) {
+        WatchStatus.IN_PROGRESS -> {
+            val totalEpisodes = media.seasons
+                .filter { it.seasonNumber != 0 }
+                .sumOf { it.episodeCount }
+            val watchedCount = watchedEpisodes.count { key -> !key.startsWith("0_") }
+            val progress = if (totalEpisodes > 0) {
+                watchedCount.coerceAtMost(totalEpisodes).toFloat() / totalEpisodes.toFloat()
+            } else {
+                0f
+            }
+            DetailsHeaderProgressState(progress.coerceIn(0f, 1f), Color(0xFFFFC107))
+        }
+        WatchStatus.UP_TO_DATE -> DetailsHeaderProgressState(1f, Color(0xFF4CAF50))
+        WatchStatus.COMPLETED -> DetailsHeaderProgressState(1f, Color(0xFF9C27B0))
+        WatchStatus.WATCHED -> DetailsHeaderProgressState(1f, Color(0xFF9C27B0))
+        else -> null
+    }
+}
+
+private fun formatIsoDate(value: String): String {
+    val date = runCatching { LocalDate.parse(value) }.getOrNull() ?: return value
+    return date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+}
+
+private fun formatMillisDate(value: Long): String {
+    val date = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate()
+    return date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
 }
 
 @Composable

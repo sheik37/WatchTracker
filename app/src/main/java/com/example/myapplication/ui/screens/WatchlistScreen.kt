@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.data.model.Media
+import com.example.myapplication.data.model.MediaType
 import com.example.myapplication.data.model.WatchCategory
 import com.example.myapplication.data.model.WatchStatus
 import com.example.myapplication.data.model.WatchlistItem
@@ -234,6 +235,9 @@ private fun RowScope.WatchlistCard(
 private data class ProgressState(val progress: Float, val color: Color)
 
 private fun WatchlistItem.progressState(): ProgressState? {
+    if (media.mediaType == MediaType.MOVIE) {
+        return null
+    }
     if (status == WatchStatus.NOT_STARTED || status == WatchStatus.NOT_WATCHED) {
         return null
     }

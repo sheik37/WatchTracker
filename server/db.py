@@ -180,6 +180,14 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             WHERE email_verified_at IS NULL;
                     END IF;
 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'display_name'
+                    ) THEN
+                        ALTER TABLE users
+                            ADD COLUMN display_name TEXT;
+                    END IF;
+
                     CREATE TABLE IF NOT EXISTS email_verification_tokens (
                         token_hash TEXT PRIMARY KEY,
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

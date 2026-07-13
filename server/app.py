@@ -23,11 +23,13 @@ from starlette.responses import RedirectResponse
 from db import initialize_schema
 from crud import (
     complete_email_delivery_slot,
+    change_password_for_user,
     create_email_verification_token,
     create_password_reset_token_for_email,
     create_verification_token_for_email,
     delete_user_by_id,
     get_user_profile,
+    update_user_display_name,
     get_user_id_from_token,
     delete_watchlist,
     get_anime_structure,
@@ -58,8 +60,10 @@ from crud import (
 from schemas import (
     AuthLoginIn,
     AuthForgotPasswordIn,
+    AuthChangePasswordIn,
     AuthLogoutIn,
     AuthMeOut,
+    AuthMeUpdateIn,
     AuthRefreshIn,
     AuthResetPasswordIn,
     AuthRegisterIn,
@@ -839,6 +843,36 @@ def auth_me(user_id: int = Depends(get_current_user_id)) -> AuthMeOut:
     if profile is None:
         raise HTTPException(status_code=404, detail="User not found")
     return AuthMeOut(**profile)
+
+
+@app.patch("/auth/me", response_model=AuthMeOut)
+def auth_me_update(payload: AuthMeUpdateIn, user_id: int = Depends(get_current_user_id)) -> AuthMeOut:
+    profile = update_user_display_name(user_id, payload.display_name)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return AuthMeOut(**profile)
+
+
+@app.post("/auth/change-password", response_model=AuthRegisterOut)
+def auth_change_password(payload: AuthChangePasswordIn, user_id: int = Depends(get_current_user_id)) -> AuthRegisterOut:
+    result = change_password_for_user(
+        user_id=user_id,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+    )
+    if result == "current_password_invalid":
+        raise HTTPException(status_code=400, detail="Current password is invalid")
+    if result == "password_too_short":
+        raise HTTPException(status_code=400, detail="Password must contain at least 10 characters")
+    if result == "password_too_weak":
+        raise HTTPException(status_code=400, detail="Password must include lower, upper, digit, and symbol")
+    if result == "same_as_current":
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
+    if result == "password_reused":
+        raise HTTPException(status_code=400, detail="Password was already used recently")
+    if result == "user_not_found":
+        raise HTTPException(status_code=404, detail="User not found")
+    return AuthRegisterOut(message="Password updated")
 
 
 @app.get("/watchlist")

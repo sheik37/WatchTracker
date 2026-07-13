@@ -3,7 +3,9 @@ package com.example.myapplication.data.repository
 import android.util.Log
 import com.example.myapplication.data.api.AniListClient
 import com.example.myapplication.data.api.AuthEmailDto
+import com.example.myapplication.data.api.AuthChangePasswordDto
 import com.example.myapplication.data.api.AuthLogoutDto
+import com.example.myapplication.data.api.AuthMeUpdateDto
 import com.example.myapplication.data.api.AuthRefreshDto
 import com.example.myapplication.data.api.AuthRequestDto
 import com.example.myapplication.data.api.AuthResetPasswordDto
@@ -62,7 +64,8 @@ class MediaRepository(
 
     data class UserProfile(
         val userId: Int,
-        val email: String
+        val email: String,
+        val displayName: String?
     )
 
     private val structureJson = Json {
@@ -146,6 +149,16 @@ class MediaRepository(
         return backend.resetPassword(AuthResetPasswordDto(token = token, password = password)).message
     }
 
+    suspend fun changePassword(currentPassword: String, newPassword: String): String {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        return backend.changePassword(
+            AuthChangePasswordDto(
+                currentPassword = currentPassword,
+                newPassword = newPassword
+            )
+        ).message
+    }
+
     suspend fun logout(refreshToken: String?) {
         backendApiService?.logout(AuthLogoutDto(refreshToken = refreshToken))
     }
@@ -155,7 +168,18 @@ class MediaRepository(
         val profile: AuthMeDto = backend.me()
         return UserProfile(
             userId = profile.userId,
-            email = profile.email
+            email = profile.email,
+            displayName = profile.displayName
+        )
+    }
+
+    suspend fun updateCurrentUserDisplayName(displayName: String?): UserProfile? {
+        val backend = backendApiService ?: return null
+        val profile: AuthMeDto = backend.updateMe(AuthMeUpdateDto(displayName = displayName))
+        return UserProfile(
+            userId = profile.userId,
+            email = profile.email,
+            displayName = profile.displayName
         )
     }
 
@@ -197,14 +221,24 @@ class MediaRepository(
 
     suspend fun getDiscoveryMedia(): List<Media> {
         val preferredGenres = buildPreferredGenres()
-        val movies = apiService.getUpcomingMovies().results.map { it.toDomain(com.example.myapplication.data.model.MediaType.MOVIE) }
-        val tv = apiService.getOnTheAirTv().results.map { it.toDomain(com.example.myapplication.data.model.MediaType.TV) }
-        return (movies + tv)
+        val trackedKeys = getTrackedMediaKeys()
+        val movies = (1..3).flatMap { page ->
+            apiService.getUpcomingMovies(page).results
+                .map { it.toDomain(com.example.myapplication.data.model.MediaType.MOVIE) }
+        }
+        val tv = (1..3).flatMap { page ->
+            apiService.getOnTheAirTv(page).results
+                .map { it.toDomain(com.example.myapplication.data.model.MediaType.TV) }
+        }
+        val rankedPool = (movies + tv)
+            .distinctBy { "${it.mediaType.value}_${it.id}" }
+            .filterNot { media -> "${media.mediaType.value}_${media.id}" in trackedKeys }
             .sortedWith(
                 compareByDescending<Media> { it.genreIds.count { genreId -> genreId in preferredGenres } }
                     .thenByDescending { it.voteAverage }
             )
-            .take(21)
+            .take(120)
+        return rankedPool.shuffled().take(33)
     }
 
     suspend fun synchronizeWithBackend() {
@@ -318,6 +352,12 @@ class MediaRepository(
     suspend fun isInWatchlist(id: Int, type: MediaType, category: WatchCategory) =
         mediaDao.isInWatchlist(id, type.value, category.value)
 
+    suspend fun getTrackedMediaKeys(): Set<String> {
+        return mediaDao.getAllWatchlist()
+            .map { "${it.mediaType}_${it.id}" }
+            .toSet()
+    }
+
     suspend fun getWatchStatus(id: Int, type: MediaType, category: WatchCategory): WatchStatus? {
         val status = mediaDao.getWatchStatus(id, type.value, category.value) ?: return null
         return WatchStatus.fromString(status)
@@ -327,8 +367,12 @@ class MediaRepository(
         return apiService.getMovieDetails(id).toDomain()
     }
 
+    suspend fun getTvDetailsFast(id: Int): MediaDetails {
+        return apiService.getTvDetails(id).toDomain()
+    }
+
     suspend fun getTvDetails(id: Int): MediaDetails {
-        val details = apiService.getTvDetails(id).toDomain()
+        val details = getTvDetailsFast(id)
         if (details.seasons.isEmpty()) {
             return details
         }

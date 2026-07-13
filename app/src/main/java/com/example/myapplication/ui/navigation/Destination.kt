@@ -16,5 +16,8 @@ sealed interface Destination {
     data object Search : Destination
 
     @Serializable
+    data object Profile : Destination
+
+    @Serializable
     data class Details(val id: Int, val type: String) : Destination
 }

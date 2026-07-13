@@ -683,6 +683,49 @@ def reset_password_with_token(token: str, password: str) -> str:
         return "updated"
 
 
+def change_password_for_user(user_id: int, current_password: str, new_password: str) -> str:
+    policy_error = _validate_password_policy(new_password)
+    if policy_error is not None:
+        return policy_error
+    new_password_hash = _hash_password(new_password)
+    with cursor() as cur:
+        cur.execute(
+            """
+            SELECT password_hash
+            FROM users
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return "user_not_found"
+        if not _verify_password(current_password, row["password_hash"]):
+            return "current_password_invalid"
+        if _verify_password(new_password, row["password_hash"]):
+            return "same_as_current"
+        if _is_password_reused(cur, user_id, new_password):
+            return "password_reused"
+        cur.execute(
+            """
+            UPDATE users
+            SET password_hash = %s
+            WHERE id = %s
+            """,
+            (new_password_hash, user_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO password_history (user_id, password_hash)
+            VALUES (%s, %s)
+            """,
+            (user_id, new_password_hash),
+        )
+        revoke_all_user_sessions(cur, user_id)
+        return "updated"
+
+
 def get_user_id_from_token(token: str) -> Optional[int]:
     token_hash = _hash_token(token)
     with cursor() as cur:
@@ -715,7 +758,7 @@ def get_user_profile(user_id: int) -> Optional[dict[str, Any]]:
     with cursor() as cur:
         cur.execute(
             """
-            SELECT id, username
+            SELECT id, username, display_name
             FROM users
             WHERE id = %s
             LIMIT 1
@@ -725,7 +768,35 @@ def get_user_profile(user_id: int) -> Optional[dict[str, Any]]:
         row = cur.fetchone()
         if row is None:
             return None
-        return {"user_id": row["id"], "email": row["username"]}
+        return {
+            "user_id": row["id"],
+            "email": row["username"],
+            "display_name": row["display_name"],
+        }
+
+
+def update_user_display_name(user_id: int, display_name: Optional[str]) -> Optional[dict[str, Any]]:
+    normalized_display_name = display_name.strip() if isinstance(display_name, str) else None
+    if normalized_display_name == "":
+        normalized_display_name = None
+    with cursor() as cur:
+        cur.execute(
+            """
+            UPDATE users
+            SET display_name = %s
+            WHERE id = %s
+            RETURNING id, username, display_name
+            """,
+            (normalized_display_name, user_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "user_id": row["id"],
+            "email": row["username"],
+            "display_name": row["display_name"],
+        }
 
 
 def list_watchlist(user_id: int, content_category: Optional[str] = None) -> list[dict[str, Any]]:

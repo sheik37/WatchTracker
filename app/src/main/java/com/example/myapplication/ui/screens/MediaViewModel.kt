@@ -36,12 +36,15 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
 
     private val _discoveryHiddenKeys = MutableStateFlow<Set<String>>(emptySet())
     val discoveryHiddenKeys: StateFlow<Set<String>> = _discoveryHiddenKeys.asStateFlow()
+    private var hasLoadedDiscoveryThisSession: Boolean = false
 
     init {
         loadDiscovery()
+        refreshTrackedMedia()
     }
 
-    fun loadDiscovery() {
+    fun loadDiscovery(force: Boolean = false) {
+        if (hasLoadedDiscoveryThisSession && !force) return
         if (com.example.myapplication.BuildConfig.TMDB_API_KEY.isBlank()) {
             _errorMessage.value = "La clé API TMDB est manquante. Veuillez l'ajouter au fichier local.properties."
             return
@@ -52,9 +55,12 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
             try {
                 val discovery = repository.getDiscoveryMedia()
                 _discoveryState.value = discovery
-                _discoveryHiddenKeys.value = discovery.mapNotNull { media ->
-                    if (isTracked(media)) mediaKey(media) else null
-                }.toSet()
+                val trackedKeys = repository.getTrackedMediaKeys()
+                _trackedMediaKeys.value = trackedKeys
+                if (_discoveryHiddenKeys.value.isEmpty()) {
+                    _discoveryHiddenKeys.value = trackedKeys
+                }
+                hasLoadedDiscoveryThisSession = true
             } catch (e: Exception) {
                 _errorMessage.value = "Échec du chargement des découvertes : ${e.message}"
             } finally {
@@ -78,6 +84,7 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
             _errorMessage.value = null
             try {
                 _searchState.value = repository.searchMedia(query)
+                refreshTrackedMedia()
             } catch (e: Exception) {
                 _errorMessage.value = "La recherche a échoué : ${e.message}"
             } finally {
@@ -90,27 +97,39 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
         _selectedMedia.value = media
     }
 
-    fun refreshTrackedMedia(mediaList: List<Media>) {
+    fun refreshTrackedMedia() {
         viewModelScope.launch {
-            _trackedMediaKeys.value = mediaList.mapNotNull { media ->
-                if (isTracked(media)) mediaKey(media) else null
-            }.toSet()
+            val trackedKeys = repository.getTrackedMediaKeys()
+            _trackedMediaKeys.value = trackedKeys
+            if (_discoveryHiddenKeys.value.isEmpty()) {
+                _discoveryHiddenKeys.value = trackedKeys
+            }
         }
     }
 
     fun followMedia(media: Media) {
-        viewModelScope.launch {
-            addMediaToWatchlist(media)
-        }
+        toggleFollowMedia(media, isTracked = false)
     }
 
     fun toggleFollowMedia(media: Media, isTracked: Boolean) {
         viewModelScope.launch {
+            val key = mediaKey(media)
             if (isTracked) {
-                removeMediaFromWatchlist(media)
-                _trackedMediaKeys.update { current -> current - mediaKey(media) }
+                _trackedMediaKeys.update { current -> current - key }
+                try {
+                    removeMediaFromWatchlist(media)
+                } catch (e: Exception) {
+                    _trackedMediaKeys.update { current -> current + key }
+                    _errorMessage.value = "Échec de la mise à jour : ${e.message}"
+                }
             } else {
-                addMediaToWatchlist(media)
+                _trackedMediaKeys.update { current -> current + key }
+                try {
+                    addMediaToWatchlist(media)
+                } catch (e: Exception) {
+                    _trackedMediaKeys.update { current -> current - key }
+                    _errorMessage.value = "Échec de la mise à jour : ${e.message}"
+                }
             }
         }
     }
@@ -118,28 +137,17 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     private suspend fun addMediaToWatchlist(media: Media) {
         val category = when (media.mediaType) {
             MediaType.MOVIE -> WatchCategory.FILMS
-            MediaType.TV -> repository.getTvDetails(media.id).watchCategory()
+            MediaType.TV -> repository.getTvDetailsFast(media.id).watchCategory()
         }
         repository.addToWatchlist(media, category, category.defaultStatus(), if (media.mediaType == MediaType.MOVIE) 1 else 0)
-        _trackedMediaKeys.update { current -> current + mediaKey(media) }
     }
 
     private suspend fun removeMediaFromWatchlist(media: Media) {
         val category = when (media.mediaType) {
             MediaType.MOVIE -> WatchCategory.FILMS
-            MediaType.TV -> repository.getTvDetails(media.id).watchCategory()
+            MediaType.TV -> repository.getTvDetailsFast(media.id).watchCategory()
         }
         repository.removeFromWatchlist(media, category)
-    }
-
-    private suspend fun isTracked(media: Media): Boolean {
-        return when (media.mediaType) {
-            MediaType.MOVIE -> repository.isInWatchlist(media.id, media.mediaType, WatchCategory.FILMS)
-            MediaType.TV -> {
-                repository.isInWatchlist(media.id, media.mediaType, WatchCategory.SERIES) ||
-                    repository.isInWatchlist(media.id, media.mediaType, WatchCategory.ANIME)
-            }
-        }
     }
 
     private fun mediaKey(media: Media): String = "${media.mediaType.value}_${media.id}"

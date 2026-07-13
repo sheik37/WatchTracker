@@ -5,6 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
@@ -24,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
@@ -84,7 +92,8 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
     val savedToken by authSessionStore.tokenFlow.collectAsState(initial = null)
     val savedRefreshToken by authSessionStore.refreshTokenFlow.collectAsState(initial = null)
     val tokenExpiresAtMillis by authSessionStore.tokenExpiresAtMillisFlow.collectAsState(initial = null)
-    val savedUsername by authSessionStore.usernameFlow.collectAsState(initial = null)
+    val savedAccountEmail by authSessionStore.accountEmailFlow.collectAsState(initial = null)
+    val savedDisplayName by authSessionStore.displayNameFlow.collectAsState(initial = null)
     val savedUserId by authSessionStore.userIdFlow.collectAsState(initial = null)
     val profileSyncedAtMillis by authSessionStore.profileSyncedAtMillisFlow.collectAsState(initial = null)
     val retryBlockedUntilMillis by authSessionStore.retryBlockedUntilMillisFlow.collectAsState(initial = null)
@@ -136,7 +145,7 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
         runCatching { repository.getCurrentUserProfile() }
             .onSuccess { profile ->
                 if (profile != null) {
-                    authSessionStore.saveUserProfile(profile.email, profile.userId)
+                    authSessionStore.saveUserProfile(profile.email, profile.userId, profile.displayName)
                 }
             }
     }
@@ -219,7 +228,7 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
                             showResendVerification = false
                             showOtpCodeField = false
                             resendVerificationCooldownSeconds = null
-                            authSessionStore.saveUsername(email.trim())
+                            authSessionStore.saveAccountEmail(email.trim())
                         }
                         .onFailure { error ->
                             val authError = error.toAuthUiError()
@@ -341,8 +350,19 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
 
     MainScreen(
         repository = repository,
-        username = savedUsername,
+        accountEmail = savedAccountEmail,
+        displayName = savedDisplayName,
         userId = savedUserId,
+        onDisplayNameChange = { newDisplayName ->
+            scope.launch {
+                val updated = runCatching { repository.updateCurrentUserDisplayName(newDisplayName) }.getOrNull()
+                if (updated != null) {
+                    authSessionStore.saveUserProfile(updated.email, updated.userId, updated.displayName)
+                } else {
+                    authSessionStore.saveDisplayName(newDisplayName)
+                }
+            }
+        },
         onLogout = {
             scope.launch {
                 runCatching { repository.logout(savedRefreshToken) }
@@ -357,7 +377,14 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onLogout: () -> Unit) {
+fun MainScreen(
+    repository: MediaRepository,
+    accountEmail: String?,
+    displayName: String?,
+    userId: Int?,
+    onDisplayNameChange: (String?) -> Unit,
+    onLogout: () -> Unit
+) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
 
@@ -374,8 +401,46 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
     val currentDestination = navBackStackEntry?.destination
     val navigator = rememberListDetailPaneScaffoldNavigator<Nothing>()
     val selectedMedia by mediaViewModel.selectedMedia.collectAsState()
+    var hideMainNavigation by remember { mutableStateOf(false) }
+    var detailOriginDestination by remember { mutableStateOf<Any?>(null) }
+
+    fun isOnDestination(destination: Any?): Boolean {
+        return when (destination) {
+            Destination.Series -> currentDestination?.hierarchy?.any { it.hasRoute<Destination.Series>() } == true
+            Destination.Films -> currentDestination?.hierarchy?.any { it.hasRoute<Destination.Films>() } == true
+            Destination.Anime -> currentDestination?.hierarchy?.any { it.hasRoute<Destination.Anime>() } == true
+            Destination.Search -> currentDestination?.hierarchy?.any { it.hasRoute<Destination.Search>() } == true
+            Destination.Profile -> currentDestination?.hierarchy?.any { it.hasRoute<Destination.Profile>() } == true
+            else -> false
+        }
+    }
+
+    LaunchedEffect(currentDestination, selectedMedia) {
+        val onProfileScreen = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Profile>() } == true
+        if (!onProfileScreen && selectedMedia == null && hideMainNavigation) {
+            hideMainNavigation = false
+        }
+    }
+
+    LaunchedEffect(currentDestination, selectedMedia, detailOriginDestination) {
+        val origin = detailOriginDestination
+        if (selectedMedia != null && origin != null && !isOnDestination(origin)) {
+            navController.navigate(origin) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+            mediaViewModel.selectMedia(null)
+            if (navigator.canNavigateBack()) {
+                scope.launch { navigator.navigateBack() }
+            }
+        }
+    }
 
     val onNavItemClick = { destination: Any ->
+        hideMainNavigation = false
         navController.navigate(destination) {
             popUpTo(navController.graph.findStartDestination().id) {
                 saveState = true
@@ -383,7 +448,9 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
             launchSingleTop = true
             restoreState = true
         }
+        detailOriginDestination = null
         mediaViewModel.selectMedia(null)
+        mediaViewModel.refreshTrackedMedia()
         scope.launch {
             if (navigator.canNavigateBack()) {
                 navigator.navigateBack()
@@ -391,44 +458,17 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
         }
     }
 
-    NavigationSuiteScaffold(
-        navigationSuiteItems = {
-            item(
-                selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Series>() } == true,
-                onClick = { onNavItemClick(Destination.Series) },
-                icon = { Icon(Icons.Rounded.VideoLibrary, contentDescription = "Séries") },
-                label = { Text("Séries") }
-            )
-            item(
-                selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Films>() } == true,
-                onClick = { onNavItemClick(Destination.Films) },
-                icon = { Icon(Icons.Rounded.Movie, contentDescription = "Films") },
-                label = { Text("Films") }
-            )
-            item(
-                selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Anime>() } == true,
-                onClick = { onNavItemClick(Destination.Anime) },
-                icon = { Icon(Icons.Rounded.LiveTv, contentDescription = "Animé") },
-                label = { Text("Animé") }
-            )
-            item(
-                selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Search>() } == true,
-                onClick = { onNavItemClick(Destination.Search) },
-                icon = { Icon(Icons.Rounded.Search, contentDescription = "Recherche") },
-                label = { Text("Recherche") }
-            )
-            item(
-                selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Profile>() } == true,
-                onClick = { onNavItemClick(Destination.Profile) },
-                icon = { Icon(Icons.Rounded.Person, contentDescription = "Profil") },
-                label = { Text("Profil") }
-            )
-        }
-    ) {
-        BackHandler(navigator.canNavigateBack()) {
+    val mainContent: @Composable () -> Unit = {
+        val onProfileScreen = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Profile>() } == true
+        val shouldHandleBackToCloseDetail = !onProfileScreen && (selectedMedia != null || navigator.canNavigateBack())
+        BackHandler(shouldHandleBackToCloseDetail) {
             scope.launch {
-                navigator.navigateBack()
+                if (navigator.canNavigateBack()) {
+                    navigator.navigateBack()
+                }
                 mediaViewModel.selectMedia(null)
+                mediaViewModel.refreshTrackedMedia()
+                hideMainNavigation = false
             }
         }
 
@@ -446,6 +486,9 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
                             viewModel = watchlistViewModel,
                             category = WatchCategory.SERIES,
                             onMediaClick = {
+                                detailOriginDestination = Destination.Series
+                                hideMainNavigation = true
+                                detailsViewModel.prepareForNewSelection()
                                 mediaViewModel.selectMedia(it)
                                 scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail) }
                             }
@@ -456,6 +499,9 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
                             viewModel = watchlistViewModel,
                             category = WatchCategory.FILMS,
                             onMediaClick = {
+                                detailOriginDestination = Destination.Films
+                                hideMainNavigation = true
+                                detailsViewModel.prepareForNewSelection()
                                 mediaViewModel.selectMedia(it)
                                 scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail) }
                             }
@@ -466,6 +512,9 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
                             viewModel = watchlistViewModel,
                             category = WatchCategory.ANIME,
                             onMediaClick = {
+                                detailOriginDestination = Destination.Anime
+                                hideMainNavigation = true
+                                detailsViewModel.prepareForNewSelection()
                                 mediaViewModel.selectMedia(it)
                                 scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail) }
                             }
@@ -475,6 +524,9 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
                         SearchScreen(
                             viewModel = mediaViewModel,
                             onMediaClick = {
+                                detailOriginDestination = Destination.Search
+                                hideMainNavigation = true
+                                detailsViewModel.prepareForNewSelection()
                                 mediaViewModel.selectMedia(it)
                                 scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail) }
                             }
@@ -482,33 +534,100 @@ fun MainScreen(repository: MediaRepository, username: String?, userId: Int?, onL
                     }
                     composable<Destination.Profile> {
                         ProfileScreen(
-                            username = username,
+                            accountEmail = accountEmail,
+                            displayName = displayName,
                             userId = userId,
+                            settingsVisible = hideMainNavigation,
+                            onDisplayNameChange = onDisplayNameChange,
+                            onChangePassword = { currentPassword, newPassword ->
+                                repository.changePassword(currentPassword, newPassword)
+                            },
+                            onPasswordChanged = onLogout,
+                            onSettingsVisibilityChanged = { isSettingsVisible ->
+                                hideMainNavigation = isSettingsVisible
+                            },
                             onLogout = onLogout
                         )
                     }
                 }
             },
             detailPane = {
-                selectedMedia?.let { media ->
-                    DetailsScreen(
-                        id = media.id,
-                        typeString = media.mediaType.value,
-                        viewModel = detailsViewModel,
-                        onBackClick = {
-                            scope.launch {
-                                if (navigator.canNavigateBack()) {
-                                    navigator.navigateBack()
+                Box(Modifier.fillMaxSize()) {
+                    AnimatedVisibility(
+                        visible = selectedMedia != null,
+                        enter = slideInVertically(
+                            initialOffsetY = { fullHeight -> fullHeight },
+                            animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(durationMillis = 300)),
+                        exit = slideOutVertically(
+                            targetOffsetY = { fullHeight -> fullHeight },
+                            animationSpec = tween(durationMillis = 240)
+                        ) + fadeOut(animationSpec = tween(durationMillis = 180))
+                    ) {
+                        val media = selectedMedia ?: return@AnimatedVisibility
+                        key("${media.mediaType.value}_${media.id}") {
+                            DetailsScreen(
+                                id = media.id,
+                                typeString = media.mediaType.value,
+                                viewModel = detailsViewModel,
+                                onBackClick = {
+                                    scope.launch {
+                                        if (navigator.canNavigateBack()) {
+                                            navigator.navigateBack()
+                                        }
+                                        mediaViewModel.selectMedia(null)
+                                        mediaViewModel.refreshTrackedMedia()
+                                        detailOriginDestination = null
+                                        hideMainNavigation = false
+                                    }
                                 }
-                                mediaViewModel.selectMedia(null)
-                            }
+                            )
                         }
-                    )
-                } ?: Box(Modifier.fillMaxSize()) {
-                    Text("Sélectionnez un titre", modifier = Modifier.align(Alignment.Center))
+                    }
                 }
             }
         )
+    }
+
+    if (hideMainNavigation) {
+        mainContent()
+    } else {
+        NavigationSuiteScaffold(
+            navigationSuiteItems = {
+                item(
+                    selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Series>() } == true,
+                    onClick = { onNavItemClick(Destination.Series) },
+                    icon = { Icon(Icons.Rounded.VideoLibrary, contentDescription = "Séries") },
+                    label = { Text("Séries") }
+                )
+                item(
+                    selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Films>() } == true,
+                    onClick = { onNavItemClick(Destination.Films) },
+                    icon = { Icon(Icons.Rounded.Movie, contentDescription = "Films") },
+                    label = { Text("Films") }
+                )
+                item(
+                    selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Anime>() } == true,
+                    onClick = { onNavItemClick(Destination.Anime) },
+                    icon = { Icon(Icons.Rounded.LiveTv, contentDescription = "Animé") },
+                    label = { Text("Animé") }
+                )
+                item(
+                    selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Search>() } == true,
+                    onClick = { onNavItemClick(Destination.Search) },
+                    icon = { Icon(Icons.Rounded.Search, contentDescription = "Recherche") },
+                    label = { Text("Recherche") }
+                )
+                item(
+                    selected = currentDestination?.hierarchy?.any { it.hasRoute<Destination.Profile>() } == true,
+                    onClick = { onNavItemClick(Destination.Profile) },
+                    icon = { Icon(Icons.Rounded.Person, contentDescription = "Profil") },
+                    label = { Text("Profil") }
+                )
+            }
+        ) {
+            mainContent()
+        }
     }
 }
 

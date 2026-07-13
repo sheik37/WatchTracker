@@ -3,6 +3,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
+    display_name TEXT,
     password_hash TEXT NOT NULL,
     email_verified_at TIMESTAMPTZ,
     created_at DATE NOT NULL DEFAULT CURRENT_DATE

@@ -32,11 +32,17 @@ interface BackendApiService {
     @POST("auth/reset-password")
     suspend fun resetPassword(@Body payload: AuthResetPasswordDto): AuthRegisterDto
 
+    @POST("auth/change-password")
+    suspend fun changePassword(@Body payload: AuthChangePasswordDto): AuthRegisterDto
+
     @POST("auth/logout")
     suspend fun logout(@Body payload: AuthLogoutDto)
 
     @GET("auth/me")
     suspend fun me(): AuthMeDto
+
+    @PATCH("auth/me")
+    suspend fun updateMe(@Body payload: AuthMeUpdateDto): AuthMeDto
 
     @GET("watchlist")
     suspend fun getWatchlist(
@@ -107,6 +113,12 @@ data class AuthResetPasswordDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class AuthChangePasswordDto(
+    @Json(name = "current_password") val currentPassword: String,
+    @Json(name = "new_password") val newPassword: String
+)
+
+@JsonClass(generateAdapter = true)
 data class AuthRefreshDto(
     @Json(name = "refresh_token") val refreshToken: String
 )
@@ -132,7 +144,13 @@ data class AuthRegisterDto(
 @JsonClass(generateAdapter = true)
 data class AuthMeDto(
     @Json(name = "user_id") val userId: Int,
-    val email: String
+    val email: String,
+    @Json(name = "display_name") val displayName: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AuthMeUpdateDto(
+    @Json(name = "display_name") val displayName: String?
 )
 
 @JsonClass(generateAdapter = true)

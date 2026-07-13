@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,9 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,14 +41,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import coil.compose.rememberAsyncImagePainter
 import com.example.myapplication.data.model.Media
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,17 +63,38 @@ fun SearchScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val trackedMediaKeys by viewModel.trackedMediaKeys.collectAsState()
+    val discoveryHiddenKeys by viewModel.discoveryHiddenKeys.collectAsState()
+    val discoveryGridState = rememberLazyGridState()
+    val filteredSearchResults = searchResults.filterNot { media ->
+        discoveryHiddenKeys.contains("${media.mediaType.value}_${media.id}")
+    }
+    val filteredDiscoveryResults = discoveryResults.filterNot { media ->
+        discoveryHiddenKeys.contains("${media.mediaType.value}_${media.id}")
+    }.take(30)
+    var visibleDiscoveryCount by remember(filteredDiscoveryResults.size) {
+        mutableStateOf(minOf(12, filteredDiscoveryResults.size))
+    }
 
     val isSearching = query.isNotBlank()
-    val displayedMedia = if (isSearching) searchResults else discoveryResults
+    val displayedMedia = if (isSearching) {
+        filteredSearchResults
+    } else {
+        filteredDiscoveryResults.take(visibleDiscoveryCount)
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadDiscovery()
     }
 
-    LaunchedEffect(searchResults) {
-        if (isSearching) {
-            viewModel.refreshTrackedMedia(searchResults)
+    LaunchedEffect(discoveryGridState, isSearching, filteredDiscoveryResults.size, visibleDiscoveryCount) {
+        if (!isSearching) {
+            snapshotFlow { discoveryGridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+                .distinctUntilChanged()
+                .collect { lastVisibleIndex ->
+                    if (lastVisibleIndex >= visibleDiscoveryCount - 6 && visibleDiscoveryCount < filteredDiscoveryResults.size) {
+                        visibleDiscoveryCount = (visibleDiscoveryCount + 12).coerceAtMost(filteredDiscoveryResults.size)
+                    }
+                }
         }
     }
 
@@ -121,7 +144,7 @@ fun SearchScreen(
                     modifier = Modifier.padding(16.dp)
                 )
             }
-        } else if (isSearching && !isLoading && searchResults.isEmpty()) {
+        } else if (isSearching && !isLoading && displayedMedia.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     "Il n'y a aucun résultat pour cette recherche",
@@ -153,7 +176,8 @@ fun SearchScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                    state = discoveryGridState,
+                    columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(8.dp),
                     modifier = Modifier
                         .padding(padding)

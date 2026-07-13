@@ -76,6 +76,11 @@ class AuthResetPasswordIn(BaseModel):
     password: str = Field(min_length=10, max_length=128)
 
 
+class AuthChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
 class AuthRefreshIn(BaseModel):
     refresh_token: str = Field(min_length=20, max_length=512)
 
@@ -96,9 +101,14 @@ class AuthRegisterOut(BaseModel):
     message: str
 
 
+class AuthMeUpdateIn(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=80)
+
+
 class AuthMeOut(BaseModel):
     user_id: int
     email: str
+    display_name: Optional[str] = None
 
 
 class SyncSnapshotOut(BaseModel):

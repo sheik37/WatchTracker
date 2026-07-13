@@ -31,6 +31,8 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
 
     private val _watchStatus = MutableStateFlow<WatchStatus?>(null)
     val watchStatus: StateFlow<WatchStatus?> = _watchStatus.asStateFlow()
+    private val _movieWatchedAtMillis = MutableStateFlow<Long?>(null)
+    val movieWatchedAtMillis: StateFlow<Long?> = _movieWatchedAtMillis.asStateFlow()
 
     private val _watchedEpisodes = MutableStateFlow<Set<String>>(emptySet())
     val watchedEpisodes: StateFlow<Set<String>> = _watchedEpisodes.asStateFlow()
@@ -42,17 +44,28 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
 
     private var progressJob: Job? = null
 
+    fun prepareForNewSelection() {
+        progressJob?.cancel()
+        _details.value = null
+        _isLoading.value = true
+        _watchStatus.value = null
+        _movieWatchedAtMillis.value = null
+        _watchedEpisodes.value = emptySet()
+        _seasonEpisodesCache.value = emptyMap()
+    }
+
     fun loadDetails(id: Int, type: MediaType) {
         viewModelScope.launch {
             _isLoading.value = true
             _details.value = null
             _watchStatus.value = null
+            _movieWatchedAtMillis.value = null
             progressJob?.cancel()
             try {
                 val details = if (type == MediaType.MOVIE) {
                     repository.getMovieDetails(id)
                 } else {
-                    repository.getTvDetails(id)
+                    repository.getTvDetailsFast(id)
                 }
                 val category = details.watchCategory()
                 _details.value = details
@@ -62,18 +75,16 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
                 } else {
                     null
                 }
+                if (type == MediaType.MOVIE && _watchStatus.value == WatchStatus.WATCHED) {
+                    _movieWatchedAtMillis.value = System.currentTimeMillis()
+                }
 
                 if (type == MediaType.TV) {
                     val totalEpisodes = details.seasons
                         .filter { it.seasonNumber != 0 }
                         .sumOf { it.episodeCount }
-                    if (_isInWatchlist.value && totalEpisodes > 0) {
-                        repository.updateWatchProgressTotal(details.toMedia(), category, totalEpisodes)
-                    }
                     _seasonEpisodesCache.value = emptyMap()
-                    if (details.seasons.sumOf { it.episodeCount } <= PREFETCH_MAX_EPISODES) {
-                        prefetchSeasonEpisodes(details)
-                    }
+                    var lastSyncedStatus: WatchStatus? = _watchStatus.value
                     progressJob = viewModelScope.launch {
                         repository.getEpisodeProgress(id).collectLatest { progressList ->
                             val watchedSet = progressList.filter { it.isWatched }
@@ -81,7 +92,6 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
                                 .toSet()
                             _watchedEpisodes.value = watchedSet
                             if (_isInWatchlist.value) {
-                                val totalEpisodes = details.seasons.sumOf { it.episodeCount }
                                 val status = when {
                                     watchedSet.isEmpty() -> WatchStatus.NOT_STARTED
                                     totalEpisodes > 0 && watchedSet.size >= totalEpisodes -> {
@@ -93,10 +103,28 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
                                     }
                                     else -> WatchStatus.IN_PROGRESS
                                 }
-                                _watchStatus.value = status
-                                repository.updateWatchStatus(details.toMedia(), category, status)
+                                if (_watchStatus.value != status) {
+                                    _watchStatus.value = status
+                                }
+                                if (lastSyncedStatus != status) {
+                                    lastSyncedStatus = status
+                                    launch {
+                                        repository.updateWatchStatus(details.toMedia(), category, status)
+                                    }
+                                }
                             }
                         }
+                    }
+
+                    if (_isInWatchlist.value && totalEpisodes > 0) {
+                        launch {
+                            repository.updateWatchProgressTotal(details.toMedia(), category, totalEpisodes)
+                        }
+                    }
+                    if (details.seasons.sumOf { it.episodeCount } <= PREFETCH_MAX_EPISODES) {
+                        prefetchSeasonEpisodes(details)
+                    } else {
+                        prefetchLikelySeasonEpisodes(details)
                     }
                 }
             } finally {
@@ -122,6 +150,26 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
 
+    private fun prefetchLikelySeasonEpisodes(details: MediaDetails) {
+        val seasonsToPrefetch = details.seasons
+            .filter { it.seasonNumber != 0 && it.episodes.isEmpty() }
+            .sortedBy { it.seasonNumber }
+            .take(2)
+        if (seasonsToPrefetch.isEmpty()) return
+        viewModelScope.launch {
+            val fetched = seasonsToPrefetch.map { season ->
+                async {
+                    season.seasonNumber to try {
+                        repository.getSeasonEpisodes(details.id, season.seasonNumber)
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+            _seasonEpisodesCache.value = _seasonEpisodesCache.value + fetched
+        }
+    }
+
     fun toggleWatchlist() {
         val currentDetails = _details.value ?: return
         val category = currentDetails.watchCategory()
@@ -131,6 +179,7 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
                 repository.removeFromWatchlist(media, category)
                 _isInWatchlist.value = false
                 _watchStatus.value = null
+                _movieWatchedAtMillis.value = null
             } else {
                 val status = category.defaultStatus()
                 val totalEpisodes = if (media.mediaType == MediaType.TV) {
@@ -144,6 +193,9 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
                 repository.addToWatchlist(media, category, status, totalEpisodes)
                 _isInWatchlist.value = true
                 _watchStatus.value = status
+                if (media.mediaType == MediaType.MOVIE) {
+                    _movieWatchedAtMillis.value = null
+                }
             }
         }
     }
@@ -155,29 +207,50 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
             repository.removeFromWatchlist(currentDetails.toMedia(), category)
             _isInWatchlist.value = false
             _watchStatus.value = null
+            if (currentDetails.mediaType == MediaType.MOVIE) {
+                _movieWatchedAtMillis.value = null
+            }
         }
     }
 
     fun toggleMovieWatched() {
         val currentDetails = _details.value ?: return
         if (currentDetails.mediaType != MediaType.MOVIE) return
+        val nextWatched = _watchStatus.value != WatchStatus.WATCHED
+        setMovieWatched(nextWatched)
+    }
+
+    fun setMovieWatched(watched: Boolean) {
+        val currentDetails = _details.value ?: return
+        if (currentDetails.mediaType != MediaType.MOVIE) return
         val category = currentDetails.watchCategory()
-        val nextStatus = if (_watchStatus.value == WatchStatus.WATCHED) {
-            WatchStatus.NOT_WATCHED
-        } else {
-            WatchStatus.WATCHED
-        }
+        val nextStatus = if (watched) WatchStatus.WATCHED else WatchStatus.NOT_WATCHED
         viewModelScope.launch {
-            if (_isInWatchlist.value) {
-                repository.updateWatchStatus(currentDetails.toMedia(), category, nextStatus)
-                _watchStatus.value = nextStatus
+            val media = currentDetails.toMedia()
+            val wasInWatchlist = _isInWatchlist.value
+
+            if (!wasInWatchlist && watched) {
+                _isInWatchlist.value = true
             }
+            _watchStatus.value = nextStatus
+            _movieWatchedAtMillis.value = if (watched) System.currentTimeMillis() else null
+
+            if (!wasInWatchlist) {
+                if (!watched) {
+                    return@launch
+                }
+                repository.addToWatchlist(media, category, WatchStatus.NOT_WATCHED, 1)
+            }
+            repository.updateWatchStatus(media, category, nextStatus)
         }
     }
 
     fun setEpisodeWatched(episode: Episode, watched: Boolean) {
         val mediaId = _details.value?.id ?: return
         viewModelScope.launch {
+            if (watched) {
+                ensureTvTrackedForEpisodeUpdate() ?: return@launch
+            }
             repository.updateEpisodeProgress(
                 mediaId = mediaId,
                 seasonNumber = episode.seasonNumber,
@@ -210,6 +283,9 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
             .sortedBy { it.seasonNumber }
         val targetSeason = seasons.firstOrNull { it.seasonNumber == seasonNumber } ?: return
         viewModelScope.launch {
+            if (watched) {
+                ensureTvTrackedForEpisodeUpdate() ?: return@launch
+            }
             val updates = if (seasonNumber == 0) {
                 (1..targetSeason.episodeCount).map { episodeNumber ->
                     EpisodeProgressEntity(
@@ -255,6 +331,9 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
             .sortedBy { it.seasonNumber }
         val targetSeason = seasons.firstOrNull { it.seasonNumber == seasonNumber } ?: return
         viewModelScope.launch {
+            if (watched) {
+                ensureTvTrackedForEpisodeUpdate() ?: return@launch
+            }
             val updates = if (watched) {
                 seasons
                     .filter { it.seasonNumber < seasonNumber }
@@ -292,6 +371,9 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
     fun markEpisodesWatched(episodes: List<Episode>, watched: Boolean) {
         val mediaId = _details.value?.id ?: return
         viewModelScope.launch {
+            if (watched) {
+                ensureTvTrackedForEpisodeUpdate() ?: return@launch
+            }
             repository.updateEpisodeProgress(
             episodes.map { episode ->
                     EpisodeProgressEntity(
@@ -315,6 +397,20 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
         voteAverage = voteAverage,
         mediaType = mediaType
     )
+
+    private suspend fun ensureTvTrackedForEpisodeUpdate(): MediaDetails? {
+        val details = _details.value ?: return null
+        if (details.mediaType != MediaType.TV) return details
+        if (_isInWatchlist.value) return details
+        val category = details.watchCategory()
+        val totalEpisodes = details.seasons
+            .filter { it.seasonNumber != 0 }
+            .sumOf { it.episodeCount }
+        repository.addToWatchlist(details.toMedia(), category, category.defaultStatus(), totalEpisodes)
+        _isInWatchlist.value = true
+        _watchStatus.value = category.defaultStatus()
+        return details
+    }
 
     private companion object {
         const val PREFETCH_MAX_EPISODES = 50

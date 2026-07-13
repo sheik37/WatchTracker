@@ -37,8 +37,11 @@ class AuthSessionStore(private val context: Context) {
     val retryBlockedUntilMillisFlow: Flow<Long?> = preferencesFlow
         .map { prefs -> prefs[RETRY_BLOCKED_UNTIL_MILLIS_KEY] }
 
-    val usernameFlow: Flow<String?> = preferencesFlow
+    val accountEmailFlow: Flow<String?> = preferencesFlow
         .map { prefs -> prefs[USERNAME_KEY] }
+
+    val displayNameFlow: Flow<String?> = preferencesFlow
+        .map { prefs -> prefs[DISPLAY_NAME_KEY] }
 
     val userIdFlow: Flow<Int?> = preferencesFlow
         .map { prefs -> prefs[USER_ID_KEY]?.toInt() }
@@ -67,21 +70,36 @@ class AuthSessionStore(private val context: Context) {
         }
     }
 
-    suspend fun saveUsername(username: String) {
+    suspend fun saveAccountEmail(email: String) {
         context.authDataStore.edit { prefs ->
-            prefs[USERNAME_KEY] = username
+            prefs[USERNAME_KEY] = email
         }
     }
 
-    suspend fun clearUsername() {
+    suspend fun clearAccountEmail() {
         context.authDataStore.edit { prefs ->
             prefs.remove(USERNAME_KEY)
         }
     }
 
-    suspend fun saveUserProfile(email: String, userId: Int) {
+    suspend fun saveDisplayName(displayName: String?) {
+        context.authDataStore.edit { prefs ->
+            if (displayName.isNullOrBlank()) {
+                prefs.remove(DISPLAY_NAME_KEY)
+            } else {
+                prefs[DISPLAY_NAME_KEY] = displayName
+            }
+        }
+    }
+
+    suspend fun saveUserProfile(email: String, userId: Int, displayName: String?) {
         context.authDataStore.edit { prefs ->
             prefs[USERNAME_KEY] = email
+            if (displayName.isNullOrBlank()) {
+                prefs.remove(DISPLAY_NAME_KEY)
+            } else {
+                prefs[DISPLAY_NAME_KEY] = displayName
+            }
             prefs[USER_ID_KEY] = userId.toLong()
             prefs[PROFILE_SYNCED_AT_MILLIS_KEY] = System.currentTimeMillis()
         }
@@ -90,6 +108,7 @@ class AuthSessionStore(private val context: Context) {
     suspend fun clearUserProfile() {
         context.authDataStore.edit { prefs ->
             prefs.remove(USERNAME_KEY)
+            prefs.remove(DISPLAY_NAME_KEY)
             prefs.remove(USER_ID_KEY)
             prefs.remove(PROFILE_SYNCED_AT_MILLIS_KEY)
         }
@@ -113,6 +132,7 @@ class AuthSessionStore(private val context: Context) {
         val TOKEN_EXPIRES_AT_MILLIS_KEY = longPreferencesKey("backend_token_expires_at_ms")
         val RETRY_BLOCKED_UNTIL_MILLIS_KEY = longPreferencesKey("auth_retry_blocked_until_ms")
         val USERNAME_KEY = stringPreferencesKey("backend_username")
+        val DISPLAY_NAME_KEY = stringPreferencesKey("backend_display_name")
         val USER_ID_KEY = longPreferencesKey("backend_user_id")
         val PROFILE_SYNCED_AT_MILLIS_KEY = longPreferencesKey("backend_profile_synced_at_ms")
     }

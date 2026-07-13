@@ -215,6 +215,53 @@ def test_auth_refresh(monkeypatch):
     assert payload["refresh_token"] == "refresh-new"
 
 
+def test_auth_me(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "get_user_profile",
+        lambda user_id: {"user_id": user_id, "email": "alex@example.com", "display_name": "Alex"},
+    )
+    response = client.get("/auth/me")
+    assert response.status_code == 200
+    assert response.json()["email"] == "alex@example.com"
+    assert response.json()["display_name"] == "Alex"
+
+
+def test_auth_me_update(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "update_user_display_name",
+        lambda user_id, display_name: {"user_id": user_id, "email": "alex@example.com", "display_name": display_name},
+    )
+    response = client.patch("/auth/me", json={"display_name": "NouveauNom"})
+    assert response.status_code == 200
+    assert response.json()["display_name"] == "NouveauNom"
+
+
+def test_auth_change_password(monkeypatch):
+    monkeypatch.setattr(app_module, "change_password_for_user", lambda user_id, current_password, new_password: "updated")
+    response = client.post(
+        "/auth/change-password",
+        json={"current_password": "ancienMotDePasse123!", "new_password": "NouveauMotDePasse123!"},
+    )
+    assert response.status_code == 200
+    assert response.json()["message"] == "Password updated"
+
+
+def test_auth_change_password_invalid_current(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "change_password_for_user",
+        lambda user_id, current_password, new_password: "current_password_invalid",
+    )
+    response = client.post(
+        "/auth/change-password",
+        json={"current_password": "bad", "new_password": "NouveauMotDePasse123!"},
+    )
+    assert response.status_code == 400
+    assert "Current password is invalid" in response.json()["detail"]
+
+
 def test_auth_resend_verification_neutral_response(monkeypatch):
     monkeypatch.setattr(app_module, "create_verification_token_for_email", lambda email: None)
     response = client.post("/auth/resend-verification", json={"email": "alex@example.com"})
