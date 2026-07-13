@@ -1,4 +1,7 @@
 import os
+import hashlib
+import hmac
+import secrets
 from contextlib import contextmanager
 from typing import Optional
 from pathlib import Path
@@ -143,8 +146,117 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ADD COLUMN revoked_at TIMESTAMPTZ;
                     END IF;
 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'auth_tokens' AND column_name = 'token_hash'
+                    ) THEN
+                        TRUNCATE TABLE auth_tokens;
+                        ALTER TABLE auth_tokens
+                            DROP CONSTRAINT IF EXISTS auth_tokens_pkey;
+                        ALTER TABLE auth_tokens
+                            ADD COLUMN token_hash TEXT;
+                        ALTER TABLE auth_tokens
+                            ALTER COLUMN token_hash SET NOT NULL;
+                        ALTER TABLE auth_tokens
+                            ADD CONSTRAINT auth_tokens_pkey PRIMARY KEY (token_hash);
+                    END IF;
+
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'auth_tokens' AND column_name = 'token'
+                    ) THEN
+                        ALTER TABLE auth_tokens
+                            DROP COLUMN token;
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'email_verified_at'
+                    ) THEN
+                        ALTER TABLE users
+                            ADD COLUMN email_verified_at TIMESTAMPTZ;
+                        UPDATE users
+                            SET email_verified_at = now()
+                            WHERE email_verified_at IS NULL;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                        token_hash TEXT PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        used_at TIMESTAMPTZ
+                    );
+
+                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                        token_hash TEXT PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        used_at TIMESTAMPTZ
+                    );
+
+                    CREATE TABLE IF NOT EXISTS password_history (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        password_hash TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+
+                    CREATE TABLE IF NOT EXISTS email_delivery_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        email_type TEXT NOT NULL CHECK (email_type IN ('verification', 'password_reset')),
+                        quota_day DATE NOT NULL DEFAULT CURRENT_DATE,
+                        status TEXT NOT NULL CHECK (status IN ('reserved', 'sent', 'failed')),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+
+                    CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+                        token_hash TEXT PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        family_id TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        revoked_at TIMESTAMPTZ,
+                        replaced_by_token_hash TEXT
+                    );
+
+                    CREATE TABLE IF NOT EXISTS auth_rate_limit_states (
+                        endpoint TEXT NOT NULL,
+                        scope_key TEXT NOT NULL,
+                        failure_count INTEGER NOT NULL DEFAULT 0,
+                        first_failure_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        last_failure_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        blocked_until TIMESTAMPTZ,
+                        PRIMARY KEY (endpoint, scope_key)
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at
                         ON auth_tokens (expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id
+                        ON auth_refresh_tokens (user_id);
+                    CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at
+                        ON auth_refresh_tokens (expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id
+                        ON email_verification_tokens (user_id);
+                    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
+                        ON password_reset_tokens (user_id);
+                    CREATE INDEX IF NOT EXISTS idx_password_history_user_id_created_at
+                        ON password_history (user_id, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_email_delivery_events_quota_day_status
+                        ON email_delivery_events (quota_day, status);
+                    CREATE INDEX IF NOT EXISTS idx_auth_rate_limit_states_last_failure_at
+                        ON auth_rate_limit_states (last_failure_at);
+
+                    INSERT INTO password_history (user_id, password_hash, created_at)
+                    SELECT u.id, u.password_hash, now()
+                    FROM users u
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM password_history ph
+                        WHERE ph.user_id = u.id
+                    );
 
                     ALTER TABLE watchlist
                         ALTER COLUMN added_at TYPE DATE USING added_at::date;
@@ -155,9 +267,92 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                 END $$;
                 """
             )
+
+            admin_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "").strip().lower()
+            admin_password = os.getenv("ADMIN_BOOTSTRAP_PASSWORD", "").strip()
+            if admin_email and admin_password:
+                cur.execute(
+                    """
+                    SELECT id, password_hash, email_verified_at
+                    FROM users
+                    WHERE username = %s
+                    LIMIT 1
+                    """,
+                    (admin_email,),
+                )
+                existing_admin = cur.fetchone()
+                if existing_admin is None:
+                    password_hash = _hash_password(admin_password)
+                    cur.execute(
+                        """
+                        INSERT INTO users (username, password_hash, email_verified_at)
+                        VALUES (%s, %s, now())
+                        RETURNING id
+                        """,
+                        (admin_email, password_hash),
+                    )
+                    admin_user_id = cur.fetchone()[0]
+                    cur.execute(
+                        """
+                        INSERT INTO password_history (user_id, password_hash)
+                        VALUES (%s, %s)
+                        """,
+                        (admin_user_id, password_hash),
+                    )
+                else:
+                    if existing_admin["email_verified_at"] is None:
+                        cur.execute(
+                            """
+                            UPDATE users
+                            SET email_verified_at = now()
+                            WHERE id = %s
+                            """,
+                            (existing_admin["id"],),
+                        )
+                    if not _verify_password(admin_password, existing_admin["password_hash"]):
+                        password_hash = _hash_password(admin_password)
+                        cur.execute(
+                            """
+                            UPDATE users
+                            SET password_hash = %s
+                            WHERE id = %s
+                            """,
+                            (password_hash, existing_admin["id"]),
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO password_history (user_id, password_hash)
+                            VALUES (%s, %s)
+                            """,
+                            (existing_admin["id"], password_hash),
+                        )
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.autocommit = False
         pool.putconn(conn)
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    rounds = 150_000
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        rounds,
+    ).hex()
+    return f"pbkdf2_sha256${rounds}${salt}${digest}"
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    try:
+        algo, rounds_text, salt, digest = encoded.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        rounds = int(rounds_text)
+    except (TypeError, ValueError):
+        return False
+    check = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    return hmac.compare_digest(check, digest)

@@ -8,8 +8,45 @@ client = TestClient(app_module.app)
 
 
 @pytest.fixture(autouse=True)
-def auth_override():
+def auth_override(monkeypatch):
+    async def no_retry(endpoint, ip, email):
+        _ = endpoint
+        _ = ip
+        _ = email
+        return 0.0, None
+
+    async def no_failure(endpoint, ip, email):
+        _ = endpoint
+        _ = ip
+        _ = email
+        return 0.0, 5, None, 0, False
+
+    async def no_success(endpoint, ip, email):
+        _ = endpoint
+        _ = ip
+        _ = email
+
+    async def limiter_no_retry(endpoint, key):
+        _ = endpoint
+        _ = key
+        return 0.0, None
+
+    async def limiter_no_failure(endpoint, key):
+        _ = endpoint
+        _ = key
+        return 0.0, 5, None, 0, False
+
+    async def limiter_no_success(endpoint, key):
+        _ = endpoint
+        _ = key
+
     app_module.app.dependency_overrides[app_module.get_current_user_id] = lambda: 1
+    monkeypatch.setattr(app_module, "_get_auth_retry_after", no_retry)
+    monkeypatch.setattr(app_module, "_register_auth_failure", no_failure)
+    monkeypatch.setattr(app_module, "_register_auth_success", no_success)
+    monkeypatch.setattr(app_module.auth_rate_limiter, "get_retry_after", limiter_no_retry)
+    monkeypatch.setattr(app_module.auth_rate_limiter, "register_failure", limiter_no_failure)
+    monkeypatch.setattr(app_module.auth_rate_limiter, "register_success", limiter_no_success)
     try:
         yield
     finally:
@@ -51,25 +88,241 @@ def test_anime_structure_lookup(monkeypatch):
 
 
 def test_auth_login(monkeypatch):
-    monkeypatch.setattr(app_module, "login_user", lambda username, password: {"token": "token-123"})
-    response = client.post("/auth/login", json={"username": "alex", "password": "password123"})
+    monkeypatch.setattr(
+        app_module,
+        "authenticate_user",
+        lambda email, password: {"user_id": 7, "email": email},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "issue_session_tokens_for_user",
+        lambda user_id: {
+            "access_token": "access-123",
+            "refresh_token": "refresh-123",
+            "expires_in_seconds": 900,
+        },
+    )
+    response = client.post("/auth/login", json={"email": "alex@example.com", "password": "password123"})
     assert response.status_code == 200
-    assert response.json()["token"] == "token-123"
+    assert response.json()["token"] == "access-123"
+    assert response.json()["access_token"] == "access-123"
+    assert response.json()["refresh_token"] == "refresh-123"
+
+
+def test_auth_login_requires_2fa_for_admin(monkeypatch):
+    monkeypatch.setattr(app_module, "authenticate_user", lambda email, password: {"user_id": 7, "email": email})
+    monkeypatch.setattr(app_module, "issue_session_tokens_for_user", lambda user_id: (_ for _ in ()).throw(RuntimeError("must_not_issue_token")))
+    monkeypatch.setattr(app_module, "ADMIN_2FA_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "ADMIN_2FA_TOTP_SECRET", "JBSWY3DPEHPK3PXP")
+    monkeypatch.setattr(app_module, "_verify_admin_totp_code", lambda code: False)
+    response = client.post("/auth/login", json={"email": "admin@example.com", "password": "password123"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Two-factor code required"
+
+
+def test_auth_login_accepts_2fa_for_admin(monkeypatch):
+    monkeypatch.setattr(app_module, "authenticate_user", lambda email, password: {"user_id": 7, "email": email})
+    monkeypatch.setattr(
+        app_module,
+        "issue_session_tokens_for_user",
+        lambda user_id: {
+            "access_token": "access-123",
+            "refresh_token": "refresh-123",
+            "expires_in_seconds": 900,
+        },
+    )
+    monkeypatch.setattr(app_module, "ADMIN_2FA_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "ADMIN_2FA_TOTP_SECRET", "JBSWY3DPEHPK3PXP")
+    monkeypatch.setattr(app_module, "_verify_admin_totp_code", lambda code: code == "123456")
+    response = client.post(
+        "/auth/login",
+        json={"email": "admin@example.com", "password": "password123", "otp_code": "123456"},
+    )
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "access-123"
+
+
+def test_auth_login_blocks_admin_when_2fa_secret_missing(monkeypatch):
+    monkeypatch.setattr(app_module, "authenticate_user", lambda email, password: {"user_id": 7, "email": email})
+    monkeypatch.setattr(app_module, "ADMIN_2FA_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "ADMIN_2FA_TOTP_SECRET", "")
+    response = client.post("/auth/login", json={"email": "admin@example.com", "password": "password123"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Admin two-factor authentication is not configured"
+
+
+def test_auth_register(monkeypatch):
+    monkeypatch.setattr(app_module, "register_user", lambda email, password: {"user_id": 1, "email": email, "created_new": True})
+    monkeypatch.setattr(app_module, "create_email_verification_token", lambda user_id: "verify-token")
+    monkeypatch.setattr(app_module, "_send_verification_email", lambda email, verify_link: None)
+    response = client.post("/auth/register", json={"email": "alex@example.com", "password": "password123"})
+    assert response.status_code == 201
+    assert response.json()["message"] == "Verification email sent"
+
+
+def test_auth_register_weak_password(monkeypatch):
+    monkeypatch.setattr(app_module, "register_user", lambda email, password: (_ for _ in ()).throw(ValueError("password_too_weak")))
+    response = client.post("/auth/register", json={"email": "alex@example.com", "password": "password1234"})
+    assert response.status_code == 400
+
+
+def test_auth_register_email_limit_reached(monkeypatch):
+    monkeypatch.setattr(app_module, "register_user", lambda email, password: {"user_id": 1, "email": email, "created_new": True})
+    monkeypatch.setattr(app_module, "create_email_verification_token", lambda user_id: "verify-token")
+    monkeypatch.setattr(app_module, "_send_verification_email", lambda email, verify_link: (_ for _ in ()).throw(RuntimeError("email_daily_limit_reached")))
+    monkeypatch.setattr(app_module, "delete_user_by_id", lambda user_id: None)
+    response = client.post("/auth/register", json={"email": "alex@example.com", "password": "password123"})
+    assert response.status_code == 503
+
+
+def test_auth_verify_email(monkeypatch):
+    valid_token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    invalid_token = "invalid-token-abcdefghijklmnopqrstuvwxyz"
+    monkeypatch.setattr(app_module, "verify_email_token", lambda token: token == valid_token)
+    ok = client.get("/auth/verify-email", params={"token": valid_token})
+    assert ok.status_code == 200
+    ko = client.get("/auth/verify-email", params={"token": invalid_token})
+    assert ko.status_code == 400
 
 
 def test_auth_logout(monkeypatch):
     monkeypatch.setattr(app_module, "revoke_auth_token", lambda token: True)
-    response = client.post("/auth/logout", headers={"Authorization": "Bearer token-123"})
+    revoked_refresh = {}
+    monkeypatch.setattr(app_module, "revoke_refresh_token", lambda token: revoked_refresh.setdefault("token", token))
+    response = client.post(
+        "/auth/logout",
+        headers={"Authorization": "Bearer token-123"},
+        json={"refresh_token": "refresh-token-abcdefghijklmnopqrstuvwxyz"},
+    )
     assert response.status_code == 204
+    assert revoked_refresh["token"] == "refresh-token-abcdefghijklmnopqrstuvwxyz"
+
+
+def test_auth_refresh(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "rotate_refresh_token",
+        lambda token: {
+            "access_token": "access-new",
+            "refresh_token": "refresh-new",
+            "expires_in_seconds": 900,
+        } if token == "refresh-token-abcdefghijklmnopqrstuvwxyz" else None,
+    )
+    response = client.post("/auth/refresh", json={"refresh_token": "refresh-token-abcdefghijklmnopqrstuvwxyz"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["access_token"] == "access-new"
+    assert payload["refresh_token"] == "refresh-new"
+
+
+def test_auth_resend_verification_neutral_response(monkeypatch):
+    monkeypatch.setattr(app_module, "create_verification_token_for_email", lambda email: None)
+    response = client.post("/auth/resend-verification", json={"email": "alex@example.com"})
+    assert response.status_code == 202
+    assert "Si un compte" in response.json()["message"]
+
+
+def test_auth_forgot_password_neutral_response(monkeypatch):
+    monkeypatch.setattr(app_module, "create_password_reset_token_for_email", lambda email: None)
+    response = client.post("/auth/forgot-password", json={"email": "alex@example.com"})
+    assert response.status_code == 202
+    assert "Si un compte existe" in response.json()["message"]
+
+
+def test_auth_forgot_password_sends_link(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        app_module,
+        "create_password_reset_token_for_email",
+        lambda email: {"email": email, "token": "valid-token-abcdefghijklmnopqrstuvwxyz"},
+    )
+    monkeypatch.setattr(app_module, "_send_password_reset_email", lambda email, link: sent.update({"email": email, "link": link}))
+    response = client.post("/auth/forgot-password", json={"email": "alex@example.com"})
+    assert response.status_code == 202
+    assert sent["email"] == "alex@example.com"
+    assert "/auth/reset-password?token=" in sent["link"]
+
+
+def test_auth_forgot_password_limit_reached_stays_neutral(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "create_password_reset_token_for_email",
+        lambda email: {"email": email, "token": "valid-token-abcdefghijklmnopqrstuvwxyz"},
+    )
+    monkeypatch.setattr(app_module, "_send_password_reset_email", lambda email, link: (_ for _ in ()).throw(RuntimeError("email_daily_limit_reached")))
+    response = client.post("/auth/forgot-password", json={"email": "alex@example.com"})
+    assert response.status_code == 202
+    assert "Si un compte existe" in response.json()["message"]
+
+
+def test_auth_reset_password_page():
+    token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    response = client.get("/auth/reset-password", params={"token": token})
+    assert response.status_code == 200
+    assert "Réinitialiser ton mot de passe" in response.text
+    assert token in response.text
+    assert "/auth/reset-password/confirm" in response.text
+
+
+def test_auth_reset_password_confirm_page(monkeypatch):
+    valid_token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    monkeypatch.setattr(
+        app_module,
+        "reset_password_with_token",
+        lambda token, password: "updated" if token == valid_token else "invalid_or_expired",
+    )
+    ok = client.post(
+        "/auth/reset-password/confirm",
+        data={"token": valid_token, "password": "password123", "confirm_password": "password123"},
+    )
+    assert ok.status_code == 200
+    assert "Mot de passe mis à jour" in ok.text
+    assert "/auth/reset-password/confirm" not in ok.text
+    ko = client.post(
+        "/auth/reset-password/confirm",
+        data={"token": valid_token, "password": "password123", "confirm_password": "password456"},
+    )
+    assert ko.status_code == 400
+    assert "ne correspondent pas" in ko.text
+
+
+def test_auth_reset_password(monkeypatch):
+    valid_token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    invalid_token = "invalid-token-abcdefghijklmnopqrstuvwxyz"
+    monkeypatch.setattr(
+        app_module,
+        "reset_password_with_token",
+        lambda token, password: "updated" if token == valid_token else "invalid_or_expired",
+    )
+    ok = client.post("/auth/reset-password", json={"token": valid_token, "password": "password123"})
+    assert ok.status_code == 200
+    ko = client.post("/auth/reset-password", json={"token": invalid_token, "password": "password123"})
+    assert ko.status_code == 400
+
+
+def test_auth_reset_password_reject_same_password(monkeypatch):
+    valid_token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    monkeypatch.setattr(app_module, "reset_password_with_token", lambda token, password: "same_as_current")
+    response = client.post("/auth/reset-password", json={"token": valid_token, "password": "password123"})
+    assert response.status_code == 400
+    assert "different from current password" in response.json()["detail"]
+
+
+def test_auth_reset_password_reject_reused_password(monkeypatch):
+    valid_token = "valid-token-abcdefghijklmnopqrstuvwxyz"
+    monkeypatch.setattr(app_module, "reset_password_with_token", lambda token, password: "password_reused")
+    response = client.post("/auth/reset-password", json={"token": valid_token, "password": "password123"})
+    assert response.status_code == 400
+    assert "already used recently" in response.json()["detail"]
 
 
 def test_auth_login_rate_limited(monkeypatch):
-    async def fake_retry_after(endpoint, ip):
-        if endpoint == "login":
+    async def fake_retry_after(endpoint, ip, email):
+        if endpoint == "login" and email == "alex@example.com":
             return 5.0, 1_700_000_123
         return 0.0, None
 
-    monkeypatch.setattr(app_module.auth_rate_limiter, "get_retry_after", fake_retry_after)
-    response = client.post("/auth/login", json={"username": "alex", "password": "password123"})
+    monkeypatch.setattr(app_module, "_get_auth_retry_after", fake_retry_after)
+    response = client.post("/auth/login", json={"email": "alex@example.com", "password": "password123"})
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "6"

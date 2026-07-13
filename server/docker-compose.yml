@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    image: watchtracker_api:26.07.00
+    image: watchtracker_api:26.07.10
     restart: unless-stopped
     env_file:
       - .env
@@ -14,19 +14,14 @@ services:
       AUTH_TOKEN_CLEANUP_INTERVAL_SECONDS: ${AUTH_TOKEN_CLEANUP_INTERVAL_SECONDS:-3600}
       AUTH_ALERT_WINDOW_SECONDS: ${AUTH_ALERT_WINDOW_SECONDS:-300}
       AUTH_ALERT_FAILURE_THRESHOLD: ${AUTH_ALERT_FAILURE_THRESHOLD:-10}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
+      ADMIN_2FA_EMAIL: ${ADMIN_2FA_EMAIL:-}
+      ADMIN_2FA_TOTP_SECRET: ${ADMIN_2FA_TOTP_SECRET:-}
+      ADMIN_2FA_TOTP_WINDOW_STEPS: ${ADMIN_2FA_TOTP_WINDOW_STEPS:-1}
+      ADMIN_2FA_TOTP_PERIOD_SECONDS: ${ADMIN_2FA_TOTP_PERIOD_SECONDS:-30}
+      ADMIN_2FA_TOTP_DIGITS: ${ADMIN_2FA_TOTP_DIGITS:-6}
     networks:
       - watchtracker_db_net
-  duckdns:
-    image: curlimages/curl:8.10.1
-    restart: unless-stopped
-    env_file:
-      - .env
-      - ${COMMON_SECRETS_FILE:-/volume1/homes/sheik37.v/docker/common/.secrets}
-    command: >
-      sh -c "while true; do
-      curl -fsS \"https://www.duckdns.org/update?domains=$$DUCKDNS_DOMAIN&token=$$DUCKDNS_TOKEN&ip=\";
-      sleep 300;
-      done"
 
 networks:
   watchtracker_db_net:

@@ -53,17 +53,52 @@ class HealthResponse(BaseModel):
 
 
 class AuthRegisterIn(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
-    password: str = Field(min_length=8, max_length=128)
+    email: str = Field(min_length=5, max_length=254)
+    password: str = Field(min_length=10, max_length=128)
 
 
 class AuthLoginIn(BaseModel):
-    username: str
+    email: str
     password: str
+    otp_code: Optional[str] = Field(default=None, min_length=6, max_length=12)
+
+
+class AuthResendVerificationIn(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+
+
+class AuthForgotPasswordIn(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+
+
+class AuthResetPasswordIn(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+    password: str = Field(min_length=10, max_length=128)
+
+
+class AuthRefreshIn(BaseModel):
+    refresh_token: str = Field(min_length=20, max_length=512)
+
+
+class AuthLogoutIn(BaseModel):
+    refresh_token: Optional[str] = Field(default=None, min_length=20, max_length=512)
 
 
 class AuthTokenOut(BaseModel):
     token: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in_seconds: int
+
+
+class AuthRegisterOut(BaseModel):
+    message: str
+
+
+class AuthMeOut(BaseModel):
+    user_id: int
+    email: str
 
 
 class SyncSnapshotOut(BaseModel):
