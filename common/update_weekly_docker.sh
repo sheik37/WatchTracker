@@ -45,7 +45,7 @@ docker compose pull
 docker compose up -d
 
 # 4) health check
-if curl -fsS https://watchtracker-api.duckdns.org/health >/dev/null; then
+if curl -fsS https://api.watchtracker.net/health >/dev/null; then
   notify_discord "WatchTracker • Update Weekly • OK" "MAJ Docker terminee. Log: $LOG_FILE"
 else
   notify_discord "WatchTracker • Update Weekly • ERROR" "Healthcheck KO apres MAJ. Log: $LOG_FILE"
