@@ -363,6 +363,14 @@ fun RootScreen(repository: MediaRepository, authSessionStore: AuthSessionStore) 
                 }
             }
         },
+        onDeleteAccount = {
+            repository.deleteCurrentUserAccount()
+            repository.clearLocalSessionData()
+            authSessionStore.clearTokens()
+            authSessionStore.clearUserProfile()
+            repository.setBackendAuthToken(null)
+            "Compte supprimé"
+        },
         onLogout = {
             scope.launch {
                 runCatching { repository.logout(savedRefreshToken) }
@@ -383,6 +391,7 @@ fun MainScreen(
     displayName: String?,
     userId: Int?,
     onDisplayNameChange: (String?) -> Unit,
+    onDeleteAccount: suspend () -> String,
     onLogout: () -> Unit
 ) {
     val navController = rememberNavController()
@@ -543,6 +552,7 @@ fun MainScreen(
                                 repository.changePassword(currentPassword, newPassword)
                             },
                             onPasswordChanged = onLogout,
+                            onDeleteAccount = onDeleteAccount,
                             onSettingsVisibilityChanged = { isSettingsVisible ->
                                 hideMainNavigation = isSettingsVisible
                             },

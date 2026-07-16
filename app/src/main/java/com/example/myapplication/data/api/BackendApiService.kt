@@ -44,6 +44,9 @@ interface BackendApiService {
     @PATCH("auth/me")
     suspend fun updateMe(@Body payload: AuthMeUpdateDto): AuthMeDto
 
+    @DELETE("auth/me")
+    suspend fun deleteMe(): AuthRegisterDto
+
     @GET("watchlist")
     suspend fun getWatchlist(
         @Query("content_category") contentCategory: String? = null

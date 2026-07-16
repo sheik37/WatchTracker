@@ -57,12 +57,14 @@ fun ProfileScreen(
     onDisplayNameChange: (String?) -> Unit,
     onChangePassword: suspend (currentPassword: String, newPassword: String) -> String,
     onPasswordChanged: () -> Unit,
+    onDeleteAccount: suspend () -> String,
     onSettingsVisibilityChanged: (Boolean) -> Unit,
     onLogout: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var showChangePasswordScreen by rememberSaveable { mutableStateOf(false) }
+    var showDeleteAccountScreen by rememberSaveable { mutableStateOf(false) }
     var showAboutDialog by rememberSaveable { mutableStateOf(false) }
     var selectedSettingsTab by rememberSaveable { mutableStateOf(0) }
     var showDisplayNameDialog by rememberSaveable { mutableStateOf(false) }
@@ -74,11 +76,13 @@ fun ProfileScreen(
     var confirmPassword by rememberSaveable { mutableStateOf("") }
     var changePasswordError by rememberSaveable { mutableStateOf<String?>(null) }
     var changePasswordInProgress by rememberSaveable { mutableStateOf(false) }
+    var deleteAccountError by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteAccountInProgress by rememberSaveable { mutableStateOf(false) }
 
     val effectiveDisplayName = displayName?.ifBlank { null } ?: userId?.toString() ?: "Non disponible"
     val userIdAsDefaultName = userId?.toString() ?: "Non disponible"
     val hasPendingDisplayNameChanges = pendingDisplayName.trim() != effectiveDisplayName
-    val settingsOrPasswordScreenVisible = settingsVisible || showChangePasswordScreen
+    val settingsOrSubScreenVisible = settingsVisible || showChangePasswordScreen || showDeleteAccountScreen
     val canSubmitPasswordChange =
         currentPassword.isNotBlank() &&
             newPassword.isNotBlank() &&
@@ -89,15 +93,17 @@ fun ProfileScreen(
         pendingDisplayName = effectiveDisplayName
     }
 
-    LaunchedEffect(settingsVisible, showChangePasswordScreen) {
-        if (settingsVisible || showChangePasswordScreen) {
+    LaunchedEffect(settingsVisible, showChangePasswordScreen, showDeleteAccountScreen) {
+        if (settingsVisible || showChangePasswordScreen || showDeleteAccountScreen) {
             onSettingsVisibilityChanged(true)
         }
     }
 
-    BackHandler(enabled = settingsOrPasswordScreenVisible) {
+    BackHandler(enabled = settingsOrSubScreenVisible) {
         if (showChangePasswordScreen) {
             showChangePasswordScreen = false
+        } else if (showDeleteAccountScreen) {
+            showDeleteAccountScreen = false
         } else if (selectedSettingsTab == 0 && hasPendingDisplayNameChanges) {
             showDiscardChangesDialog = true
         } else {
@@ -107,14 +113,22 @@ fun ProfileScreen(
 
     Scaffold(
         topBar = {
-            if (settingsOrPasswordScreenVisible) {
+            if (settingsOrSubScreenVisible) {
                 CenterAlignedTopAppBar(
-                    title = { Text(if (showChangePasswordScreen) "Modifier le mot de passe" else "Paramètres") },
+                    title = {
+                        if (showDeleteAccountScreen) {
+                            Text("")
+                        } else {
+                            Text(if (showChangePasswordScreen) "Modifier le mot de passe" else "Paramètres")
+                        }
+                    },
                     navigationIcon = {
                         IconButton(
                             onClick = {
                                 if (showChangePasswordScreen) {
                                     showChangePasswordScreen = false
+                                } else if (showDeleteAccountScreen) {
+                                    showDeleteAccountScreen = false
                                 } else {
                                     if (selectedSettingsTab == 0 && hasPendingDisplayNameChanges) {
                                         showDiscardChangesDialog = true
@@ -234,6 +248,49 @@ fun ProfileScreen(
                     Text("Modifier le mot de passe")
                 }
             }
+        } else if (showDeleteAccountScreen) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "La suppression du compte est définitive. Toutes vos données liées à ce compte " +
+                        "(profil, suivi de contenus, progression des épisodes et sessions actives) " +
+                        "seront supprimées de manière irréversible."
+                )
+                Text(
+                    "Conformément aux obligations réglementaires, certaines traces techniques " +
+                        "strictement nécessaires à la sécurité et à la conformité peuvent être " +
+                        "conservées pour une durée limitée."
+                )
+                if (!deleteAccountError.isNullOrBlank()) {
+                    Text(
+                        text = deleteAccountError ?: "",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        deleteAccountError = null
+                        scope.launch {
+                            deleteAccountInProgress = true
+                            runCatching { onDeleteAccount() }
+                                .onFailure { error ->
+                                    deleteAccountInProgress = false
+                                    deleteAccountError = error.toPasswordChangeMessage()
+                                }
+                        }
+                    },
+                    enabled = !deleteAccountInProgress,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Supprimer mon compte")
+                }
+            }
         } else if (settingsVisible) {
             Column(
                 modifier = Modifier
@@ -342,6 +399,18 @@ fun ProfileScreen(
                         ) {
                             Text("Se déconnecter")
                         }
+                        Text(
+                            text = "Supprimer le compte",
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .clickable {
+                                    deleteAccountError = null
+                                    deleteAccountInProgress = false
+                                    showDeleteAccountScreen = true
+                                }
+                                .padding(top = 8.dp)
+                        )
                     }
                 } else {
                     Column(

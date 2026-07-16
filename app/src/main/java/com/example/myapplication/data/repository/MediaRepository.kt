@@ -183,6 +183,11 @@ class MediaRepository(
         )
     }
 
+    suspend fun deleteCurrentUserAccount(): String {
+        val backend = backendApiService ?: error("Backend API URL is not configured")
+        return backend.deleteMe().message
+    }
+
     @Synchronized
     private fun rebuildBackendApiService() {
         val baseUrl = backendBaseUrl ?: run {

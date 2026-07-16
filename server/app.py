@@ -853,6 +853,13 @@ def auth_me_update(payload: AuthMeUpdateIn, user_id: int = Depends(get_current_u
     return AuthMeOut(**profile)
 
 
+@app.delete("/auth/me", response_model=AuthRegisterOut)
+def auth_me_delete(user_id: int = Depends(get_current_user_id)) -> AuthRegisterOut:
+    delete_user_by_id(user_id)
+    _auth_log(logging.INFO, "auth_account_deleted", user_id=user_id)
+    return AuthRegisterOut(message="Account deleted")
+
+
 @app.post("/auth/change-password", response_model=AuthRegisterOut)
 def auth_change_password(payload: AuthChangePasswordIn, user_id: int = Depends(get_current_user_id)) -> AuthRegisterOut:
     result = change_password_for_user(
