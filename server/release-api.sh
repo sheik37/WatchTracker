@@ -134,7 +134,12 @@ if [ "$NO_DOWN" != "true" ]; then
   run_compose down
 fi
 
-run_compose build "$SERVICE_NAME"
+if [ "$DRY_RUN" = "true" ]; then
+    echo "[DRY-RUN] docker build --network=host -t $IMAGE_NAME:$target_version ."
+else
+    docker build --network=host -t "$IMAGE_NAME:$target_version" .
+fi
+
 run_compose up -d "$SERVICE_NAME"
 
 echo "Deployment termine pour '$SERVICE_NAME' en version '$target_version'."

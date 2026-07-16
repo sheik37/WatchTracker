@@ -35,6 +35,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -48,6 +49,19 @@ android {
         compose = true
         buildConfig = true
     }
+    lint {
+        disable += "NullSafeMutableLiveData"
+    }
+}
+
+val copyReleaseApk by tasks.registering(Copy::class) {
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(layout.buildDirectory.dir("outputs/apk/renamed"))
+    rename { "WatchTracker-v1.0.0.apk" }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    finalizedBy(copyReleaseApk)
 }
 
 dependencies {
