@@ -14,6 +14,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,8 +47,35 @@ fun AuthScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var otpCode by remember { mutableStateOf("") }
+    var loginErrorMessage by remember { mutableStateOf<String?>(null) }
+    var loginInfoMessage by remember { mutableStateOf<String?>(null) }
+    var loginRetryAfterSeconds by remember { mutableStateOf<Int?>(null) }
+    var loginAttemptsRemaining by remember { mutableStateOf<Int?>(null) }
+    var registerErrorMessage by remember { mutableStateOf<String?>(null) }
+    var registerInfoMessage by remember { mutableStateOf<String?>(null) }
+    var registerRetryAfterSeconds by remember { mutableStateOf<Int?>(null) }
+    var registerAttemptsRemaining by remember { mutableStateOf<Int?>(null) }
 
-    val isRateLimited = (retryAfterSeconds ?: 0) > 0
+    LaunchedEffect(errorMessage, infoMessage, retryAfterSeconds, attemptsRemaining) {
+        if (isRegisterMode) {
+            registerErrorMessage = errorMessage
+            registerInfoMessage = infoMessage
+            registerRetryAfterSeconds = retryAfterSeconds
+            registerAttemptsRemaining = attemptsRemaining
+        } else {
+            loginErrorMessage = errorMessage
+            loginInfoMessage = infoMessage
+            loginRetryAfterSeconds = retryAfterSeconds
+            loginAttemptsRemaining = attemptsRemaining
+        }
+    }
+
+    val displayedErrorMessage = if (isRegisterMode) registerErrorMessage else loginErrorMessage
+    val displayedInfoMessage = if (isRegisterMode) registerInfoMessage else loginInfoMessage
+    val displayedRetryAfterSeconds = if (isRegisterMode) registerRetryAfterSeconds else loginRetryAfterSeconds
+    val displayedAttemptsRemaining = if (isRegisterMode) registerAttemptsRemaining else loginAttemptsRemaining
+
+    val isRateLimited = (displayedRetryAfterSeconds ?: 0) > 0
     val isAdminLoginTarget = admin2faEmail
         ?.takeIf { it.isNotBlank() }
         ?.equals(email.trim(), ignoreCase = true) == true
@@ -226,9 +254,9 @@ fun AuthScreen(
             }
         }
 
-        if (!errorMessage.isNullOrBlank()) {
+        if (!displayedErrorMessage.isNullOrBlank()) {
             Text(
-                text = errorMessage,
+                text = displayedErrorMessage ?: "",
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -236,9 +264,9 @@ fun AuthScreen(
             )
         }
 
-        if (!infoMessage.isNullOrBlank()) {
+        if (!displayedInfoMessage.isNullOrBlank()) {
             Text(
-                text = infoMessage,
+                text = displayedInfoMessage ?: "",
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -248,15 +276,15 @@ fun AuthScreen(
 
         if (isRateLimited) {
             Text(
-                text = "Trop de tentatives. Réessaie dans ${retryAfterSeconds}s.",
+                text = "Trop de tentatives. Réessaie dans ${displayedRetryAfterSeconds ?: 0}s.",
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
             )
-        } else if (attemptsRemaining != null) {
+        } else if (displayedAttemptsRemaining != null) {
             Text(
-                text = "Tentatives restantes avant blocage : $attemptsRemaining",
+                text = "Tentatives restantes avant blocage : $displayedAttemptsRemaining",
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .fillMaxWidth()

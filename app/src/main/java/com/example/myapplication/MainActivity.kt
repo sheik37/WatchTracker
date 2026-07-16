@@ -663,6 +663,7 @@ private fun String.toFriendlyAuthMessage(): String {
         "New password must be different from current password" -> "Le nouveau mot de passe doit être différent du mot de passe actuel."
         "Invalid or expired reset token" -> "Le lien de réinitialisation est invalide ou expiré."
         "Email already exists" -> "Cet email est déjà utilisé."
+        "Invalid credentials" -> "Identifiants invalides."
         "Two-factor code required" -> "Le code 2FA est requis pour ce compte."
         "Invalid two-factor code" -> "Le code 2FA est invalide."
         "Admin two-factor authentication is not configured" -> "Le 2FA admin n'est pas configuré côté serveur."
