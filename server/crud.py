@@ -7,6 +7,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from psycopg2.extras import execute_values
+
 from db import cursor
 from schemas import (
     AnimeStructureIn,
@@ -476,13 +478,6 @@ def issue_session_tokens_for_user(user_id: int) -> dict[str, Any]:
         return _issue_session_tokens(cur, user_id)
 
 
-def login_user(email: str, password: str) -> Optional[dict[str, Any]]:
-    user = authenticate_user(email, password)
-    if user is None:
-        return None
-    return issue_session_tokens_for_user(user["user_id"])
-
-
 def create_email_verification_token(user_id: int) -> str:
     token = secrets.token_urlsafe(48)
     token_hash = _hash_token(token)
@@ -927,17 +922,21 @@ def list_all_episode_progress(user_id: int) -> list[dict[str, Any]]:
 def replace_episode_progress(user_id: int, media_id: int, items: list[EpisodeProgressItemIn]) -> None:
     if not items:
         return
+    values = [
+        (user_id, media_id, item.season_number, item.episode_number, item.is_watched)
+        for item in items
+    ]
     with cursor() as cur:
-        for item in items:
-            cur.execute(
-                """
-                INSERT INTO episode_progress (user_id, media_id, season_number, episode_number, is_watched)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (user_id, media_id, season_number, episode_number)
-                DO UPDATE SET is_watched = EXCLUDED.is_watched, updated_at = CURRENT_DATE
-                """,
-                (user_id, media_id, item.season_number, item.episode_number, item.is_watched),
-            )
+        execute_values(
+            cur,
+            """
+            INSERT INTO episode_progress (user_id, media_id, season_number, episode_number, is_watched)
+            VALUES %s
+            ON CONFLICT (user_id, media_id, season_number, episode_number)
+            DO UPDATE SET is_watched = EXCLUDED.is_watched, updated_at = CURRENT_DATE
+            """,
+            values,
+        )
 
 
 def list_anime_structures() -> list[dict[str, Any]]:

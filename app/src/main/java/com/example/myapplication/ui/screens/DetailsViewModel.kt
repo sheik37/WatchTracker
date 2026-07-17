@@ -213,13 +213,6 @@ class DetailsViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
 
-    fun toggleMovieWatched() {
-        val currentDetails = _details.value ?: return
-        if (currentDetails.mediaType != MediaType.MOVIE) return
-        val nextWatched = _watchStatus.value != WatchStatus.WATCHED
-        setMovieWatched(nextWatched)
-    }
-
     fun setMovieWatched(watched: Boolean) {
         val currentDetails = _details.value ?: return
         if (currentDetails.mediaType != MediaType.MOVIE) return

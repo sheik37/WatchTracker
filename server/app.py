@@ -1,11 +1,11 @@
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import asyncio
 import base64
 from collections import deque
-from dataclasses import dataclass, field
 import html
 import hmac
 import hashlib
@@ -84,12 +84,6 @@ TOKEN_CLEANUP_INTERVAL_SECONDS = int(os.getenv("AUTH_TOKEN_CLEANUP_INTERVAL_SECO
 AUTH_ALERT_WINDOW_SECONDS = int(os.getenv("AUTH_ALERT_WINDOW_SECONDS", "300"))
 AUTH_ALERT_FAILURE_THRESHOLD = int(os.getenv("AUTH_ALERT_FAILURE_THRESHOLD", "10"))
 AUTH_LOGGER = logging.getLogger("watchtracker.auth")
-
-
-@dataclass
-class _RateLimitState:
-    failures: deque[float] = field(default_factory=deque)
-    blocked_until: float = 0.0
 
 
 class _AuthRateLimiter:
@@ -419,10 +413,10 @@ async def auth_register(payload: AuthRegisterIn, request: Request) -> AuthRegist
 
     try:
         user: Optional[dict] = None
-        user = register_user(payload.email, payload.password)
-        verification_token = create_email_verification_token(user["user_id"])
+        user = await run_in_threadpool(register_user, payload.email, payload.password)
+        verification_token = await run_in_threadpool(create_email_verification_token, user["user_id"])
         verify_link = f"{str(request.base_url).rstrip('/')}/auth/verify-email?token={verification_token}"
-        _send_verification_email(user["email"], verify_link)
+        await run_in_threadpool(_send_verification_email, user["email"], verify_link)
     except ValueError as exc:
         delay, remaining_attempts, blocked_until, ip_failures, should_alert = await _register_auth_failure("register", ip, email)
         _auth_log(
@@ -464,7 +458,7 @@ async def auth_register(payload: AuthRegisterIn, request: Request) -> AuthRegist
         raise
     except Exception as exc:
         if user is not None and user.get("created_new"):
-            delete_user_by_id(user["user_id"])
+            await run_in_threadpool(delete_user_by_id, user["user_id"])
         if isinstance(exc, RuntimeError) and str(exc) == "email_daily_limit_reached":
             _auth_log(logging.ERROR, "email_quota_limit_reached", endpoint="register", ip=ip, email=email)
             raise HTTPException(status_code=503, detail="Daily email limit reached")
@@ -496,7 +490,7 @@ async def auth_login(payload: AuthLoginIn, request: Request) -> AuthTokenOut:
         )
 
     try:
-        user = authenticate_user(payload.email, payload.password)
+        user = await run_in_threadpool(authenticate_user, payload.email, payload.password)
     except ValueError as exc:
         if str(exc) == "email_not_verified":
             _auth_log(logging.WARNING, "auth_login_failed", ip=ip, email=email, reason="email_not_verified")
@@ -570,7 +564,7 @@ async def auth_login(payload: AuthLoginIn, request: Request) -> AuthTokenOut:
                     reset_epoch_seconds=blocked_until,
                 ),
             )
-    token = issue_session_tokens_for_user(user["user_id"])
+    token = await run_in_threadpool(issue_session_tokens_for_user, user["user_id"])
     await _register_auth_success("login", ip, email)
     _auth_log(logging.INFO, "auth_login_success", ip=ip, email=email)
     return AuthTokenOut(
@@ -591,7 +585,7 @@ async def auth_refresh(payload: AuthRefreshIn, request: Request) -> AuthTokenOut
             detail="Too many attempts. Try again later.",
             headers=_rate_limit_headers(retry_after_seconds=retry_after, reset_epoch_seconds=reset_epoch),
         )
-    token = rotate_refresh_token(payload.refresh_token)
+    token = await run_in_threadpool(rotate_refresh_token, payload.refresh_token)
     if token is None:
         _, _, blocked_until, _, _ = await auth_rate_limiter.register_failure("refresh", ip)
         raise HTTPException(
@@ -635,11 +629,11 @@ async def auth_resend_verification(payload: AuthResendVerificationIn, request: R
             headers=_rate_limit_headers(retry_after_seconds=retry_after, reset_epoch_seconds=reset_epoch),
         )
 
-    row = create_verification_token_for_email(email)
+    row = await run_in_threadpool(create_verification_token_for_email, email)
     if row is not None:
         verify_link = f"{str(request.base_url).rstrip('/')}/auth/verify-email?token={row['token']}"
         try:
-            _send_verification_email(row["email"], verify_link)
+            await run_in_threadpool(_send_verification_email, row["email"], verify_link)
         except Exception as exc:
             if isinstance(exc, RuntimeError) and str(exc) == "email_daily_limit_reached":
                 _auth_log(logging.ERROR, "email_quota_limit_reached", endpoint="resend_verification", ip=ip, email=email)
@@ -674,11 +668,11 @@ async def auth_forgot_password(payload: AuthForgotPasswordIn, request: Request) 
             headers=_rate_limit_headers(retry_after_seconds=retry_after, reset_epoch_seconds=reset_epoch),
         )
 
-    row = create_password_reset_token_for_email(email)
+    row = await run_in_threadpool(create_password_reset_token_for_email, email)
     if row is not None:
         try:
             reset_link = _build_password_reset_link(request, row["token"])
-            _send_password_reset_email(row["email"], reset_link)
+            await run_in_threadpool(_send_password_reset_email, row["email"], reset_link)
         except Exception as exc:
             if isinstance(exc, RuntimeError) and str(exc) == "email_daily_limit_reached":
                 _auth_log(logging.ERROR, "email_quota_limit_reached", endpoint="forgot_password", ip=ip, email=email)

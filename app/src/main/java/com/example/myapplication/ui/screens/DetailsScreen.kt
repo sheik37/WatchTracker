@@ -719,6 +719,9 @@ fun SeasonSection(
                     CircularProgressIndicator()
                 }
             } else {
+                val watchedEpisodePositions = remember(watchedEpisodes) {
+                    watchedEpisodes.mapNotNull { parseEpisodePositionKey(it) }.sorted()
+                }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -730,7 +733,7 @@ fun SeasonSection(
                             viewModel = viewModel,
                             episode = episode,
                             isWatched = isWatched,
-                            watchedEpisodes = watchedEpisodes,
+                            watchedEpisodePositions = watchedEpisodePositions,
                             seasonOffset = seasonOffset,
                             isSpecialSeason = isSpecialSeason
                         )
@@ -747,7 +750,7 @@ private fun EpisodeRow(
     viewModel: DetailsViewModel,
     episode: Episode,
     isWatched: Boolean,
-    watchedEpisodes: Set<String>,
+    watchedEpisodePositions: List<Int>,
     seasonOffset: Int,
     isSpecialSeason: Boolean
 ) {
@@ -755,18 +758,8 @@ private fun EpisodeRow(
     var showConfirm by remember { mutableStateOf(false) }
     var dialogChecked by remember(isWatched) { mutableStateOf(isWatched) }
     val expectedPreviousCount = seasonOffset + episode.episodeNumber - 1
-    val watchedPreviousCount = watchedEpisodes.count { key ->
-        val parts = key.split("_")
-        if (parts.size != 2) {
-            false
-        } else {
-            val seasonNumber = parts[0].toIntOrNull()
-            val episodeNumber = parts[1].toIntOrNull()
-            seasonNumber != null && episodeNumber != null &&
-                (seasonNumber < episode.seasonNumber ||
-                    (seasonNumber == episode.seasonNumber && episodeNumber < episode.episodeNumber))
-        }
-    }
+    val currentEpisodePosition = episodePositionKey(episode.seasonNumber, episode.episodeNumber)
+    val watchedPreviousCount = watchedEpisodePositions.countLessThan(currentEpisodePosition)
 
     fun requestCheckedChange(target: Boolean) {
         dialogChecked = target
@@ -942,4 +935,30 @@ private fun seasonLabel(seasonNumber: Int): String = when (seasonNumber) {
 private fun episodeNumbers(seasonOffset: Int, episode: Episode): String {
     val globalNumber = seasonOffset + episode.episodeNumber
     return "S%02d | E%02d (E%02d)".format(episode.seasonNumber, episode.episodeNumber, globalNumber)
+}
+
+private fun parseEpisodePositionKey(key: String): Int? {
+    val separatorIndex = key.indexOf('_')
+    if (separatorIndex <= 0 || separatorIndex >= key.length - 1) return null
+    val seasonNumber = key.substring(0, separatorIndex).toIntOrNull() ?: return null
+    val episodeNumber = key.substring(separatorIndex + 1).toIntOrNull() ?: return null
+    return episodePositionKey(seasonNumber, episodeNumber)
+}
+
+private fun episodePositionKey(seasonNumber: Int, episodeNumber: Int): Int {
+    return seasonNumber * 10_000 + episodeNumber
+}
+
+private fun List<Int>.countLessThan(value: Int): Int {
+    var left = 0
+    var right = size
+    while (left < right) {
+        val mid = (left + right) ushr 1
+        if (this[mid] < value) {
+            left = mid + 1
+        } else {
+            right = mid
+        }
+    }
+    return left
 }

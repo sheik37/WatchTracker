@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.myapplication.data.model.Media
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,6 +87,15 @@ fun SearchScreen(
         viewModel.loadDiscovery()
     }
 
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            viewModel.search("")
+            return@LaunchedEffect
+        }
+        delay(350)
+        viewModel.search(query)
+    }
+
     LaunchedEffect(discoveryGridState, isSearching, filteredDiscoveryResults.size, visibleDiscoveryCount) {
         if (!isSearching) {
             snapshotFlow { discoveryGridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
@@ -104,7 +114,6 @@ fun SearchScreen(
                 value = query,
                 onValueChange = {
                     query = it
-                    viewModel.search(it)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,7 +125,6 @@ fun SearchScreen(
                     if (query.isNotBlank()) {
                         IconButton(onClick = {
                             query = ""
-                            viewModel.search("")
                             viewModel.loadDiscovery()
                         }) {
                             Icon(Icons.Rounded.Close, contentDescription = "Effacer la recherche")

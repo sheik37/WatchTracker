@@ -56,6 +56,11 @@ class MediaRepository(
     private val mediaDao: MediaDao,
     private val animeStructureDao: AnimeStructureDao
 ) {
+    private data class CachedGenres(
+        val genres: Set<Int>,
+        val cachedAtMillis: Long
+    )
+
     data class AuthTokens(
         val accessToken: String,
         val refreshToken: String?,
@@ -83,6 +88,8 @@ class MediaRepository(
     private var backendAuthToken: String? = null
     @Volatile
     private var lastBackendSyncAtMillis: Long = 0L
+    private val genresCacheLock = Any()
+    private val watchlistGenreCache = mutableMapOf<String, CachedGenres>()
 
     @Synchronized
     fun setBackendBaseUrl(baseUrl: String?) {
@@ -210,12 +217,6 @@ class MediaRepository(
             .addConverterFactory(MoshiConverterFactory.create(backendJson))
             .build()
             .create(BackendApiService::class.java)
-    }
-
-    suspend fun getTrendingMedia(): List<Media> {
-        return apiService.getTrendingMedia().results
-            .filter { it.mediaType == "movie" || it.mediaType == "tv" }
-            .map { it.toDomain() }
     }
 
     suspend fun searchMedia(query: String): List<Media> {
@@ -631,12 +632,37 @@ class MediaRepository(
     private suspend fun buildPreferredGenres(): Set<Int> = coroutineScope {
         val watchlist = mediaDao.getAllWatchlist()
         if (watchlist.isEmpty()) return@coroutineScope emptySet()
+        val now = System.currentTimeMillis()
+        val activeKeys = watchlist.map { "${it.mediaType}_${it.id}" }.toSet()
+
+        synchronized(genresCacheLock) {
+            watchlistGenreCache.keys.retainAll(activeKeys)
+        }
 
         val genreLists = watchlist.map { entity ->
             async {
+                val cacheKey = "${entity.mediaType}_${entity.id}"
+                val cachedGenres = synchronized(genresCacheLock) {
+                    watchlistGenreCache[cacheKey]
+                        ?.takeIf { (now - it.cachedAtMillis) < WATCHLIST_GENRE_CACHE_TTL_MILLIS }
+                        ?.genres
+                }
+                if (cachedGenres != null) {
+                    return@async cachedGenres.toList()
+                }
+
                 when (MediaType.fromString(entity.mediaType)) {
                     MediaType.MOVIE -> runCatching { apiService.getMovieDetails(entity.id).genres.map { it.id } }.getOrDefault(emptyList())
                     MediaType.TV -> runCatching { apiService.getTvDetails(entity.id).genres.map { it.id } }.getOrDefault(emptyList())
+                }.also { fetchedGenres ->
+                    if (fetchedGenres.isNotEmpty()) {
+                        synchronized(genresCacheLock) {
+                            watchlistGenreCache[cacheKey] = CachedGenres(
+                                genres = fetchedGenres.toSet(),
+                                cachedAtMillis = now
+                            )
+                        }
+                    }
                 }
             }
         }.map { it.await() }
@@ -884,6 +910,7 @@ class MediaRepository(
     private companion object {
         const val SEASON_SPLIT_DAYS = 70L
         const val BACKEND_SYNC_MIN_INTERVAL_MILLIS = 60_000L
+        const val WATCHLIST_GENRE_CACHE_TTL_MILLIS = 6 * 60 * 60 * 1000L
         const val TAG = "MediaRepository"
     }
 }

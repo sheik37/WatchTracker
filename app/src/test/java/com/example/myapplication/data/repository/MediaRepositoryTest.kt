@@ -34,24 +34,6 @@ import org.junit.Test
 class MediaRepositoryTest {
 
     @Test
-    fun getTrendingMedia_filtersNonMovieAndTv() = runTest {
-        val tmdb = FakeTmdbApiService().apply {
-            trending = mediaResponse(
-                MediaDto(id = 1, title = "Movie", name = null, posterPath = null, backdropPath = null, overview = "", releaseDate = "2024-01-01", firstAirDate = null, voteAverage = 7.0, mediaType = "movie"),
-                MediaDto(id = 2, title = null, name = "TV", posterPath = null, backdropPath = null, overview = "", releaseDate = null, firstAirDate = "2024-01-02", voteAverage = 8.0, mediaType = "tv"),
-                MediaDto(id = 3, title = "Person", name = null, posterPath = null, backdropPath = null, overview = "", releaseDate = null, firstAirDate = null, voteAverage = 9.0, mediaType = "person")
-            )
-        }
-        val repository = createRepository(tmdb = tmdb)
-
-        val results = repository.getTrendingMedia()
-
-        assertEquals(listOf(1, 2), results.map { it.id })
-        assertEquals(MediaType.MOVIE, results[0].mediaType)
-        assertEquals(MediaType.TV, results[1].mediaType)
-    }
-
-    @Test
     fun getDiscoveryMedia_prioritizesPreferredGenresThenVoteAverage() = runTest {
         val dao = FakeMediaDao().apply {
             addToWatchlist(
@@ -181,15 +163,12 @@ class MediaRepositoryTest {
 }
 
 private class FakeTmdbApiService : TmdbApiService {
-    var trending: MediaResponse = MediaResponse(1, emptyList(), 1, 0)
     var search: MediaResponse = MediaResponse(1, emptyList(), 1, 0)
     var upcoming: MediaResponse = MediaResponse(1, emptyList(), 1, 0)
     var onTheAir: MediaResponse = MediaResponse(1, emptyList(), 1, 0)
     val movieDetailsById: MutableMap<Int, MovieDetailsDto> = mutableMapOf()
     val tvDetailsById: MutableMap<Int, TvDetailsDto> = mutableMapOf()
     val seasonDetailsByKey: MutableMap<Pair<Int, Int>, SeasonDetailsDto> = mutableMapOf()
-
-    override suspend fun getTrendingMedia(page: Int): MediaResponse = trending
 
     override suspend fun searchMulti(query: String, page: Int): MediaResponse = search
 
@@ -336,4 +315,3 @@ private class FakeAnimeStructureDao : AnimeStructureDao {
         data.clear()
     }
 }
-

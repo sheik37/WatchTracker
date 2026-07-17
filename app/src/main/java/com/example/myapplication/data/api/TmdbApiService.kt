@@ -5,11 +5,6 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 
 interface TmdbApiService {
-    @GET("trending/all/day")
-    suspend fun getTrendingMedia(
-        @Query("page") page: Int = 1
-    ): MediaResponse
-
     @GET("search/multi")
     suspend fun searchMulti(
         @Query("query") query: String,

@@ -19,10 +19,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 class DataContainer(context: Context) {
     val authSessionStore = AuthSessionStore(context.applicationContext)
+    private val httpLoggingLevel = if (BuildConfig.DEBUG) {
+        HttpLoggingInterceptor.Level.BODY
+    } else {
+        HttpLoggingInterceptor.Level.NONE
+    }
 
     private val tmdbHttpClient = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = httpLoggingLevel
         })
         .addInterceptor { chain ->
             val original = chain.request()
@@ -37,7 +42,7 @@ class DataContainer(context: Context) {
 
     private val aniListHttpClient = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = httpLoggingLevel
         })
         .build()
 

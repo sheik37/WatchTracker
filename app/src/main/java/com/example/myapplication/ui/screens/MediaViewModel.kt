@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
@@ -37,6 +39,7 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     private val _discoveryHiddenKeys = MutableStateFlow<Set<String>>(emptySet())
     val discoveryHiddenKeys: StateFlow<Set<String>> = _discoveryHiddenKeys.asStateFlow()
     private var hasLoadedDiscoveryThisSession: Boolean = false
+    private var searchJob: Job? = null
 
     init {
         loadDiscovery()
@@ -70,6 +73,7 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     }
 
     fun search(query: String) {
+        searchJob?.cancel()
         if (query.isBlank()) {
             _searchState.value = emptyList()
             _errorMessage.value = null
@@ -79,12 +83,14 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
             _errorMessage.value = "La clé API TMDB est manquante. Veuillez l'ajouter au fichier local.properties."
             return
         }
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             try {
                 _searchState.value = repository.searchMedia(query)
                 refreshTrackedMedia()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _errorMessage.value = "La recherche a échoué : ${e.message}"
             } finally {
@@ -105,10 +111,6 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
                 _discoveryHiddenKeys.value = trackedKeys
             }
         }
-    }
-
-    fun followMedia(media: Media) {
-        toggleFollowMedia(media, isTracked = false)
     }
 
     fun toggleFollowMedia(media: Media, isTracked: Boolean) {
