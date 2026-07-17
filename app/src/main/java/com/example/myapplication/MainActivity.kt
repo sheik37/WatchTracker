@@ -60,13 +60,19 @@ import com.example.myapplication.ui.screens.WatchlistScreen
 import com.example.myapplication.ui.screens.WatchlistViewModel
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
 private const val RESEND_VERIFICATION_COOLDOWN_SECONDS = 60
 private const val FORGOT_PASSWORD_COOLDOWN_SECONDS = 60
 private const val ADMIN_2FA_EMAIL = "admin@watchtracker.net"
+private const val GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/sheik37/WatchTracker/releases/latest"
+private const val GITHUB_TAGS_URL = "https://api.github.com/repos/sheik37/WatchTracker/tags"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -552,6 +558,9 @@ fun MainScreen(
                                 repository.changePassword(currentPassword, newPassword)
                             },
                             onPasswordChanged = onLogout,
+                            onCheckForUpdates = {
+                                checkForAppUpdates()
+                            },
                             onDeleteAccount = onDeleteAccount,
                             onSettingsVisibilityChanged = { isSettingsVisible ->
                                 hideMainNavigation = isSettingsVisible
@@ -669,6 +678,113 @@ private fun String.toFriendlyAuthMessage(): String {
         "Admin two-factor authentication is not configured" -> "Le 2FA admin n'est pas configuré côté serveur."
         else -> this
     }
+}
+
+private suspend fun checkForAppUpdates(): String = withContext(Dispatchers.IO) {
+    val lookup = fetchLatestVersionTag()
+    val latestTag = lookup.tag ?: return@withContext lookup.message
+    val installedVersion = BuildConfig.VERSION_NAME
+    val comparison = compareVersions(installedVersion, latestTag)
+    if (comparison < 0) {
+        "Nouvelle version disponible : $latestTag (installée : $installedVersion)."
+    } else {
+        "Aucune mise à jour disponible. Version installée : $installedVersion."
+    }
+}
+
+private data class UpdateLookupResult(
+    val tag: String?,
+    val message: String
+)
+
+private fun fetchLatestVersionTag(): UpdateLookupResult {
+    val releaseResponse = fetchGithubJson(GITHUB_LATEST_RELEASE_URL)
+    val releaseTag = releaseResponse?.takeIf { it.first in 200..299 }?.second
+        ?.let { body ->
+            Regex("\"tag_name\"\\s*:\\s*\"([^\"]+)\"")
+                .find(body)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.trim()
+        }
+    if (!releaseTag.isNullOrBlank()) {
+        return UpdateLookupResult(tag = releaseTag, message = "")
+    }
+
+    val tagsResponse = fetchGithubJson(GITHUB_TAGS_URL)
+    val tagsTag = tagsResponse
+        ?.takeIf { it.first in 200..299 }
+        ?.second
+        ?.let { body ->
+            Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
+                .find(body)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.trim()
+        }
+    if (!tagsTag.isNullOrBlank()) {
+        return UpdateLookupResult(tag = tagsTag, message = "")
+    }
+
+    val releaseStatus = releaseResponse?.first
+    val tagsStatus = tagsResponse?.first
+    if (releaseStatus == 404 && tagsStatus == 404) {
+        return UpdateLookupResult(
+            tag = null,
+            message = "Le dépôt GitHub est privé ou inaccessible depuis l'application."
+        )
+    }
+    if (releaseStatus == 403 || tagsStatus == 403) {
+        return UpdateLookupResult(
+            tag = null,
+            message = "Vérification bloquée par GitHub (limite API). Réessaie plus tard."
+        )
+    }
+    return UpdateLookupResult(
+        tag = null,
+        message = "Impossible de déterminer la dernière version."
+    )
+}
+
+private fun fetchGithubJson(url: String): Pair<Int, String>? {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 5000
+        readTimeout = 5000
+        setRequestProperty("Accept", "application/vnd.github+json")
+        setRequestProperty("User-Agent", "WatchTracker-Android")
+    }
+    return try {
+        val statusCode = connection.responseCode
+        val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        statusCode to body
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun compareVersions(current: String, latest: String): Int {
+    val currentParts = normalizeVersion(current)
+    val latestParts = normalizeVersion(latest)
+    val maxSize = maxOf(currentParts.size, latestParts.size)
+    for (index in 0 until maxSize) {
+        val currentValue = currentParts.getOrElse(index) { 0 }
+        val latestValue = latestParts.getOrElse(index) { 0 }
+        if (currentValue != latestValue) {
+            return currentValue.compareTo(latestValue)
+        }
+    }
+    return 0
+}
+
+private fun normalizeVersion(rawVersion: String): List<Int> {
+    return rawVersion
+        .trim()
+        .removePrefix("v")
+        .split(Regex("[^0-9]+"))
+        .mapNotNull { part -> part.toIntOrNull() }
+        .ifEmpty { listOf(0) }
 }
 
 private fun Throwable.toAuthUiError(): AuthUiError {

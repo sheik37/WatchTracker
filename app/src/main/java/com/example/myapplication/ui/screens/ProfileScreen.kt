@@ -2,6 +2,7 @@ package com.example.myapplication.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Info
@@ -40,10 +42,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.BuildConfig
+import com.example.myapplication.R
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
@@ -57,6 +61,7 @@ fun ProfileScreen(
     onDisplayNameChange: (String?) -> Unit,
     onChangePassword: suspend (currentPassword: String, newPassword: String) -> String,
     onPasswordChanged: () -> Unit,
+    onCheckForUpdates: suspend () -> String,
     onDeleteAccount: suspend () -> String,
     onSettingsVisibilityChanged: (Boolean) -> Unit,
     onLogout: () -> Unit
@@ -65,7 +70,7 @@ fun ProfileScreen(
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var showChangePasswordScreen by rememberSaveable { mutableStateOf(false) }
     var showDeleteAccountScreen by rememberSaveable { mutableStateOf(false) }
-    var showAboutDialog by rememberSaveable { mutableStateOf(false) }
+    var showAboutScreen by rememberSaveable { mutableStateOf(false) }
     var selectedSettingsTab by rememberSaveable { mutableStateOf(0) }
     var showDisplayNameDialog by rememberSaveable { mutableStateOf(false) }
     var showDiscardChangesDialog by rememberSaveable { mutableStateOf(false) }
@@ -78,11 +83,13 @@ fun ProfileScreen(
     var changePasswordInProgress by rememberSaveable { mutableStateOf(false) }
     var deleteAccountError by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteAccountInProgress by rememberSaveable { mutableStateOf(false) }
+    var updateCheckMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var updateCheckInProgress by rememberSaveable { mutableStateOf(false) }
 
     val effectiveDisplayName = displayName?.ifBlank { null } ?: userId?.toString() ?: "Non disponible"
     val userIdAsDefaultName = userId?.toString() ?: "Non disponible"
     val hasPendingDisplayNameChanges = pendingDisplayName.trim() != effectiveDisplayName
-    val settingsOrSubScreenVisible = settingsVisible || showChangePasswordScreen || showDeleteAccountScreen
+    val settingsOrSubScreenVisible = settingsVisible || showChangePasswordScreen || showDeleteAccountScreen || showAboutScreen
     val canSubmitPasswordChange =
         currentPassword.isNotBlank() &&
             newPassword.isNotBlank() &&
@@ -104,6 +111,8 @@ fun ProfileScreen(
             showChangePasswordScreen = false
         } else if (showDeleteAccountScreen) {
             showDeleteAccountScreen = false
+        } else if (showAboutScreen) {
+            showAboutScreen = false
         } else if (selectedSettingsTab == 0 && hasPendingDisplayNameChanges) {
             showDiscardChangesDialog = true
         } else {
@@ -118,6 +127,8 @@ fun ProfileScreen(
                     title = {
                         if (showDeleteAccountScreen) {
                             Text("")
+                        } else if (showAboutScreen) {
+                            Text("À propos")
                         } else {
                             Text(if (showChangePasswordScreen) "Modifier le mot de passe" else "Paramètres")
                         }
@@ -129,6 +140,8 @@ fun ProfileScreen(
                                     showChangePasswordScreen = false
                                 } else if (showDeleteAccountScreen) {
                                     showDeleteAccountScreen = false
+                                } else if (showAboutScreen) {
+                                    showAboutScreen = false
                                 } else {
                                     if (selectedSettingsTab == 0 && hasPendingDisplayNameChanges) {
                                         showDiscardChangesDialog = true
@@ -170,7 +183,7 @@ fun ProfileScreen(
                                 leadingIcon = { Icon(Icons.Rounded.Info, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
-                                    showAboutDialog = true
+                                    showAboutScreen = true
                                 }
                             )
                         }
@@ -289,6 +302,62 @@ fun ProfileScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Supprimer mon compte")
+                }
+            }
+        } else if (showAboutScreen) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.size(16.dp))
+                Image(
+                    painter = painterResource(id = R.drawable.watchtracker_logo),
+                    contentDescription = "Logo WatchTracker",
+                    modifier = Modifier.size(120.dp)
+                )
+                Spacer(modifier = Modifier.size(20.dp))
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Version", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                        Text(BuildConfig.VERSION_NAME)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Mises à jour", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                        Button(
+                            onClick = {
+                                updateCheckMessage = null
+                                scope.launch {
+                                    updateCheckInProgress = true
+                                    runCatching { onCheckForUpdates() }
+                                        .onSuccess { message ->
+                                            updateCheckMessage = message
+                                            updateCheckInProgress = false
+                                        }
+                                        .onFailure { error ->
+                                            updateCheckMessage = error.message ?: "Impossible de vérifier les mises à jour."
+                                            updateCheckInProgress = false
+                                        }
+                                }
+                            },
+                            enabled = !updateCheckInProgress,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (updateCheckInProgress) "Vérification..." else "Vérifier")
+                        }
+                        if (!updateCheckMessage.isNullOrBlank()) {
+                            Text(
+                                text = updateCheckMessage ?: "",
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
             }
         } else if (settingsVisible) {
@@ -453,19 +522,6 @@ fun ProfileScreen(
                 }
             }
         }
-    }
-
-    if (showAboutDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showAboutDialog = false },
-            title = { Text("À propos") },
-            text = { Text("WatchTracker\nVersion 1.0") },
-            confirmButton = {
-                TextButton(onClick = { showAboutDialog = false }) {
-                    Text("OK")
-                }
-            }
-        )
     }
 
     if (showDisplayNameDialog) {
