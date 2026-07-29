@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -63,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -83,6 +85,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -876,12 +879,68 @@ private fun EpisodeRow(
                         )
                     }
                 }
-                Checkbox(
-                    checked = isWatched,
-                    onCheckedChange = { target -> requestCheckedChange(target) }
-                )
+                if (episode.airDate == null || isFutureEpisodeRelease(episode)) {
+                    EpisodeReleaseStatus(episode = episode)
+                } else {
+                    Checkbox(
+                        checked = isWatched,
+                        onCheckedChange = { target -> requestCheckedChange(target) }
+                    )
+                }
             }
         }
+    }
+}
+
+private fun isFutureEpisodeRelease(episode: Episode): Boolean {
+    val airDate = episode.airDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
+    return airDate.isAfter(LocalDate.now(ZoneId.systemDefault()))
+}
+
+@Composable
+private fun EpisodeReleaseStatus(episode: Episode) {
+    val today = LocalDate.now(ZoneId.systemDefault())
+    val airDate = episode.airDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    if (airDate == null) {
+        Column(
+            modifier = Modifier.wrapContentWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "A venir",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
+
+    val daysUntil = ChronoUnit.DAYS.between(today, airDate).toInt()
+    val valueLabel = when {
+        daysUntil <= 0 -> "0"
+        else -> daysUntil.toString()
+    }
+    val unitLabel = when {
+        daysUntil == 1 -> "jour"
+        else -> "jours"
+    }
+    Column(
+        modifier = Modifier.wrapContentWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = valueLabel,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = unitLabel,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
