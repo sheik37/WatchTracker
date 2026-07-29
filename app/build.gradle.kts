@@ -21,8 +21,8 @@ android {
         applicationId = "com.example.myapplication"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -57,7 +57,7 @@ android {
 val copyReleaseApk by tasks.registering(Copy::class) {
     from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
     into(layout.buildDirectory.dir("outputs/apk/renamed"))
-    rename { "WatchTracker-v1.0.0.apk" }
+    rename { "WatchTracker-v1.2.0.apk" }
 }
 
 tasks.matching { it.name == "assembleRelease" }.configureEach {

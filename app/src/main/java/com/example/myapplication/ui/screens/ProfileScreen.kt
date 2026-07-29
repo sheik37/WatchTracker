@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.BuildConfig
 import com.example.myapplication.R
+import com.example.myapplication.UpdateCheckResult
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
@@ -61,7 +62,8 @@ fun ProfileScreen(
     onDisplayNameChange: (String?) -> Unit,
     onChangePassword: suspend (currentPassword: String, newPassword: String) -> String,
     onPasswordChanged: () -> Unit,
-    onCheckForUpdates: suspend () -> String,
+    onCheckForUpdates: suspend () -> UpdateCheckResult,
+    onInstallUpdate: suspend (UpdateCheckResult) -> String,
     onDeleteAccount: suspend () -> String,
     onSettingsVisibilityChanged: (Boolean) -> Unit,
     onLogout: () -> Unit
@@ -85,6 +87,8 @@ fun ProfileScreen(
     var deleteAccountInProgress by rememberSaveable { mutableStateOf(false) }
     var updateCheckMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var updateCheckInProgress by rememberSaveable { mutableStateOf(false) }
+    var updateInstallInProgress by rememberSaveable { mutableStateOf(false) }
+    var pendingUpdate by remember { mutableStateOf<UpdateCheckResult?>(null) }
 
     val effectiveDisplayName = displayName?.ifBlank { null } ?: userId?.toString() ?: "Non disponible"
     val userIdAsDefaultName = userId?.toString() ?: "Non disponible"
@@ -95,6 +99,13 @@ fun ProfileScreen(
             newPassword.isNotBlank() &&
             confirmPassword.isNotBlank() &&
             !changePasswordInProgress
+    val isUpdateAvailable = pendingUpdate?.updateAvailable == true
+    val updateButtonLabel = when {
+        updateInstallInProgress -> "Installation..."
+        isUpdateAvailable -> "Mettre à jour"
+        updateCheckInProgress -> "Vérification..."
+        else -> "Vérifier"
+    }
 
     LaunchedEffect(displayName, userId) {
         pendingDisplayName = effectiveDisplayName
@@ -332,24 +343,43 @@ fun ProfileScreen(
                         Text("Mises à jour", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
                         Button(
                             onClick = {
-                                updateCheckMessage = null
-                                scope.launch {
-                                    updateCheckInProgress = true
-                                    runCatching { onCheckForUpdates() }
-                                        .onSuccess { message ->
-                                            updateCheckMessage = message
+                                if (isUpdateAvailable) {
+                                    val update = pendingUpdate ?: return@Button
+                                    scope.launch {
+                                        updateInstallInProgress = true
+                                        try {
+                                            runCatching { onInstallUpdate(update) }
+                                                .onFailure { error ->
+                                                    updateCheckMessage = error.message ?: "Impossible d'installer la mise à jour."
+                                                }
+                                        } finally {
+                                            updateInstallInProgress = false
+                                        }
+                                    }
+                                } else {
+                                    updateCheckMessage = null
+                                    scope.launch {
+                                        updateCheckInProgress = true
+                                        try {
+                                            runCatching { onCheckForUpdates() }
+                                                .onSuccess { result ->
+                                                    pendingUpdate = if (result.updateAvailable) result else null
+                                                    updateCheckMessage = result.message
+                                                }
+                                                .onFailure { error ->
+                                                    pendingUpdate = null
+                                                    updateCheckMessage = error.message ?: "Impossible de vérifier les mises à jour."
+                                                }
+                                        } finally {
                                             updateCheckInProgress = false
                                         }
-                                        .onFailure { error ->
-                                            updateCheckMessage = error.message ?: "Impossible de vérifier les mises à jour."
-                                            updateCheckInProgress = false
-                                        }
+                                    }
                                 }
                             },
-                            enabled = !updateCheckInProgress,
+                            enabled = !updateCheckInProgress && !updateInstallInProgress,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(if (updateCheckInProgress) "Vérification..." else "Vérifier")
+                            Text(updateButtonLabel)
                         }
                         if (!updateCheckMessage.isNullOrBlank()) {
                             Text(
