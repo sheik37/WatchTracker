@@ -1,0 +1,86 @@
+name: ✅ Format & Commits
+
+on:
+  push:
+    branches: [main, develop, feature/**]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  line_endings:
+    name: 📄 Line Ending Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 🔍 Check line endings
+        run: |
+          echo "Vérifying LF on shell scripts..."
+          if find . -name "*.sh" -type f -exec grep -l $'\r' {} \; 2>/dev/null; then
+            echo "❌ CRLF found in shell scripts! Use: git config core.autocrlf false"
+            exit 1
+          fi
+          echo "✓ Tous les scripts sont en LF"
+
+  commit_messages:
+    name: 📝 Commit Messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 🔍 Check commit messages
+        run: |
+          echo "Vérifying commits are in French..."
+          # Pour main et develop: accepter les commits avec Copilot
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "✓ Main/develop: tous les commits acceptés"
+            exit 0
+          fi
+          
+          # Pour feature branches: vérifier que les messages commencent par mots-clés français
+          FRENCH_KEYWORDS="feat|fix|docs|style|refactor|test|chore|perf|amélioration|ajout|correction|suppression"
+          
+          git log origin/${{ github.base_ref }}..HEAD --format=%B | \
+            grep -E "^(${FRENCH_KEYWORDS}):" || {
+            echo "❌ Commits doivent commencer par: feat, fix, docs, style, refactor, test, chore, perf, amélioration, ajout, correction, suppression"
+            exit 1
+          }
+          echo "✓ Messages de commits valides"
+
+  trailing_whitespace:
+    name: 🎯 Trailing Whitespace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🔍 Check trailing whitespace
+        run: |
+          if git diff-index --check --cached HEAD; then
+            echo "✓ Aucun whitespace trailing détecté"
+          else
+            echo "❌ Whitespace trailing trouvé"
+            exit 1
+          fi
+
+  file_sizes:
+    name: 📦 Large File Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🔍 Check for large files
+        run: |
+          MAX_SIZE=50000000  # 50MB
+          LARGE_FILES=$(find . -size +${MAX_SIZE}c -type f -not -path './.git/*' -not -path './.gradle/*' -not -path './build/*' 2>/dev/null)
+          
+          if [ -n "$LARGE_FILES" ]; then
+            echo "❌ Fichiers trop volumineux trouvés:"
+            echo "$LARGE_FILES"
+            exit 1
+          fi
+          echo "✓ Tous les fichiers sont de taille acceptable"
