@@ -30,6 +30,7 @@ server/.env
 BD/.env
 BD/scripts/*.log
 common/.secrets
+WatchTracker/
 
 # ─── OS / editors ─────────────────────────────────────────────────────────────
 .DS_Store
