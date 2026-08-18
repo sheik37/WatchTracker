@@ -105,7 +105,7 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                     ALTER TABLE episode_progress DROP CONSTRAINT IF EXISTS episode_progress_pkey;
 
                     ALTER TABLE watchlist
-                        ADD CONSTRAINT watchlist_pkey PRIMARY KEY (user_id, id, media_type);
+                        ADD CONSTRAINT watchlist_pkey PRIMARY KEY (user_id, id, media_type, content_category);
                     ALTER TABLE episode_progress
                         ADD CONSTRAINT episode_progress_pkey PRIMARY KEY (user_id, media_id, season_number, episode_number);
 
@@ -124,6 +124,37 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ADD CONSTRAINT episode_progress_user_id_fkey
                             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
                     END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'watchlist' AND column_name = 'updated_at'
+                    ) THEN
+                        ALTER TABLE watchlist
+                            ADD COLUMN updated_at TIMESTAMPTZ;
+                        UPDATE watchlist
+                            SET updated_at = now()
+                            WHERE updated_at IS NULL;
+                        ALTER TABLE watchlist
+                            ALTER COLUMN updated_at SET NOT NULL;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS watchlist_tombstones (
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        id INTEGER NOT NULL,
+                        media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'tv')),
+                        content_category TEXT NOT NULL CHECK (content_category IN ('films', 'series', 'anime')),
+                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (user_id, id, media_type, content_category)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        media_id INTEGER NOT NULL,
+                        season_number INTEGER NOT NULL,
+                        episode_number INTEGER NOT NULL,
+                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (user_id, media_id, season_number, episode_number)
+                    );
 
                     IF NOT EXISTS (
                         SELECT 1 FROM information_schema.columns
@@ -256,6 +287,10 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                         ON email_delivery_events (quota_day, status);
                     CREATE INDEX IF NOT EXISTS idx_auth_rate_limit_states_last_failure_at
                         ON auth_rate_limit_states (last_failure_at);
+                    CREATE INDEX IF NOT EXISTS idx_watchlist_tombstones_user_deleted
+                        ON watchlist_tombstones (user_id, deleted_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_episode_progress_tombstones_user_deleted
+                        ON episode_progress_tombstones (user_id, deleted_at DESC);
 
                     INSERT INTO password_history (user_id, password_hash, created_at)
                     SELECT u.id, u.password_hash, now()
@@ -268,10 +303,19 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
 
                     ALTER TABLE watchlist
                         ALTER COLUMN added_at TYPE DATE USING added_at::date;
+                    ALTER TABLE watchlist
+                        ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
                     ALTER TABLE episode_progress
-                        ALTER COLUMN updated_at TYPE DATE USING updated_at::date;
-                    ALTER TABLE anime_structures
-                        ALTER COLUMN updated_at TYPE DATE USING updated_at::date;
+                        ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
+                    CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        media_id INTEGER NOT NULL,
+                        season_number INTEGER NOT NULL,
+                        episode_number INTEGER NOT NULL,
+                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (user_id, media_id, season_number, episode_number)
+                    );
+                    DROP TABLE IF EXISTS anime_structures;
                 END $$;
                 """
             )

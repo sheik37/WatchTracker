@@ -15,6 +15,7 @@ import math
 import os
 import struct
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from urllib import request as urllib_request
 from urllib import parse as urllib_parse
@@ -32,14 +33,16 @@ from crud import (
     update_user_display_name,
     get_user_id_from_token,
     delete_watchlist,
-    get_anime_structure,
     list_all_episode_progress,
+    list_all_episode_progress_since,
     authenticate_user,
     issue_session_tokens_for_user,
-    list_anime_structures,
     list_episode_progress,
     list_watchlist,
-    normalize_title,
+    list_watchlist_since,
+    list_watchlist_tombstones,
+    list_watchlist_tombstones_since,
+    list_episode_progress_tombstones_since,
     purge_expired_tokens,
     get_rate_limit_retry_after,
     register_rate_limit_failure,
@@ -52,9 +55,9 @@ from crud import (
     verify_email_token,
     revoke_auth_token,
     replace_episode_progress,
+    delete_episode_progress,
     update_watch_status,
     update_watch_total,
-    upsert_anime_structure,
     upsert_watchlist,
 )
 from schemas import (
@@ -70,7 +73,6 @@ from schemas import (
     AuthRegisterOut,
     AuthResendVerificationIn,
     AuthTokenOut,
-    AnimeStructureIn,
     EpisodeProgressItemIn,
     HealthResponse,
     SyncSnapshotOut,
@@ -170,6 +172,12 @@ def _client_ip(request: Request) -> str:
     if forwarded_for:
         return forwarded_for.split(",")[0].strip() or "unknown"
     return request.client.host if request.client is not None else "unknown"
+
+
+def _millis_to_utc(value: Optional[int]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
 
 
 def _email_rate_key(email: str) -> str:
@@ -879,16 +887,24 @@ def auth_change_password(payload: AuthChangePasswordIn, user_id: int = Depends(g
 @app.get("/watchlist")
 def get_watchlist(
     content_category: Optional[str] = Query(default=None),
+    since: Optional[int] = Query(default=None, ge=0),
     user_id: int = Depends(get_current_user_id),
 ) -> list[dict]:
-    return list_watchlist(user_id, content_category)
+    return list_watchlist_since(user_id, content_category, _millis_to_utc(since))
 
 
 @app.get("/sync/snapshot", response_model=SyncSnapshotOut)
-def get_sync_snapshot(user_id: int = Depends(get_current_user_id)) -> SyncSnapshotOut:
+def get_sync_snapshot(
+    since: Optional[int] = Query(default=None, ge=0),
+    user_id: int = Depends(get_current_user_id),
+) -> SyncSnapshotOut:
+    since_dt = _millis_to_utc(since)
     return SyncSnapshotOut(
-        watchlist=list_watchlist(user_id),
-        episode_progress=list_all_episode_progress(user_id),
+        snapshot_at=int(datetime.now(timezone.utc).timestamp() * 1000),
+        watchlist=list_watchlist_since(user_id, since=since_dt),
+        episode_progress=list_all_episode_progress_since(user_id, since_dt),
+        watchlist_tombstones=list_watchlist_tombstones_since(user_id, since_dt),
+        episode_progress_tombstones=list_episode_progress_tombstones_since(user_id, since_dt),
     )
 
 
@@ -949,22 +965,11 @@ def put_episode_progress(
     replace_episode_progress(user_id, media_id, items)
 
 
-@app.get("/anime-structures")
-def get_anime_structures(user_id: int = Depends(get_current_user_id)) -> list[dict]:
-    _ = user_id
-    return list_anime_structures()
-
-
-@app.get("/anime-structures/{title}")
-def get_anime_structure_by_title(title: str, user_id: int = Depends(get_current_user_id)) -> dict:
-    _ = user_id
-    row = get_anime_structure(normalize_title(title))
-    if row is None:
-        raise HTTPException(status_code=404, detail="Anime structure not found")
-    return row
-
-
-@app.put("/anime-structures")
-def put_anime_structure(item: AnimeStructureIn, user_id: int = Depends(get_current_user_id)) -> dict:
-    _ = user_id
-    return upsert_anime_structure(item)
+@app.delete("/episode-progress/{media_id}/{season_number}/{episode_number}", status_code=204)
+def remove_episode_progress(
+    media_id: int,
+    season_number: int,
+    episode_number: int,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    delete_episode_progress(user_id, media_id, season_number, episode_number)

@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS watchlist (
     content_status TEXT NOT NULL,
     total_episodes INTEGER NOT NULL DEFAULT 0,
     added_at DATE NOT NULL DEFAULT CURRENT_DATE,
-    PRIMARY KEY (user_id, id, media_type)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, id, media_type, content_category)
 );
 
 CREATE TABLE IF NOT EXISTS episode_progress (
@@ -89,16 +90,26 @@ CREATE TABLE IF NOT EXISTS episode_progress (
     season_number INTEGER NOT NULL,
     episode_number INTEGER NOT NULL,
     is_watched BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at DATE NOT NULL DEFAULT CURRENT_DATE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, media_id, season_number, episode_number)
 );
 
-CREATE TABLE IF NOT EXISTS anime_structures (
-    normalized_title TEXT PRIMARY KEY,
-    season TEXT CHECK (season IN ('WINTER', 'SPRING', 'SUMMER', 'FALL')),
-    season_year INTEGER,
-    payload_json JSONB NOT NULL,
-    updated_at DATE NOT NULL DEFAULT CURRENT_DATE
+CREATE TABLE IF NOT EXISTS watchlist_tombstones (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id INTEGER NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'tv')),
+    content_category TEXT NOT NULL CHECK (content_category IN ('films', 'series', 'anime')),
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, id, media_type, content_category)
+);
+
+CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, media_id, season_number, episode_number)
 );
 
 CREATE INDEX IF NOT EXISTS idx_watchlist_category
@@ -106,6 +117,12 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_category
 
 CREATE INDEX IF NOT EXISTS idx_episode_progress_media
     ON episode_progress (user_id, media_id);
+
+CREATE INDEX IF NOT EXISTS idx_watchlist_tombstones_user_deleted
+    ON watchlist_tombstones (user_id, deleted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_episode_progress_tombstones_user_deleted
+    ON episode_progress_tombstones (user_id, deleted_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id
     ON auth_tokens (user_id);
@@ -133,8 +150,5 @@ CREATE INDEX IF NOT EXISTS idx_email_delivery_events_quota_day_status
 
 CREATE INDEX IF NOT EXISTS idx_auth_rate_limit_states_last_failure_at
     ON auth_rate_limit_states (last_failure_at);
-
-CREATE INDEX IF NOT EXISTS idx_anime_structures_season_year
-    ON anime_structures (season_year);
 
 COMMIT;
