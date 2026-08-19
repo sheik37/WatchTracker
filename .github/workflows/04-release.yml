@@ -91,6 +91,39 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  publish_version_json:
+    name: Publish version.json
+    runs-on: ubuntu-latest
+    needs: [resolve_version, build_apk]
+    steps:
+      - name: Generate version.json
+        run: |
+          VERSION="${{ needs.resolve_version.outputs.version }}"
+          BUILD="${{ needs.resolve_version.outputs.build_number }}"
+          TAG="${{ needs.resolve_version.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          APK_URL="https://github.com/${REPO}/releases/download/${TAG}/WatchTracker-${TAG}.apk"
+          NOTES="Voir les notes de version : https://github.com/${REPO}/releases/tag/${TAG}"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --argjson build "$BUILD" \
+            --arg android_url "$APK_URL" \
+            --arg notes "$NOTES" \
+            '{latest_version: $version, latest_build: $build, android_url: $android_url, ios_url: "", release_notes: $notes}' \
+            > version.json
+
+          echo "=== version.json généré ==="
+          cat version.json
+
+      - name: Upload version.json to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve_version.outputs.tag }}
+          files: version.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build_ios:
     name: Build iOS Artifact
     runs-on: macos-latest
