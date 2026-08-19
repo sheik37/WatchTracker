@@ -1,23 +1,39 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# ─── Flutter ──────────────────────────────────────────────────────────────────
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+flutter_app/build/
+flutter_app/.packages
+flutter_app/pubspec.lock
+
+# ─── Android (inside flutter_app) ─────────────────────────────────────────────
+flutter_app/android/.gradle/
+flutter_app/android/local.properties
+flutter_app/android/key.properties
+flutter_app/android/app/google-services.json
+
+# ─── iOS (inside flutter_app) ─────────────────────────────────────────────────
+flutter_app/ios/Pods/
+flutter_app/ios/.symlinks/
+flutter_app/ios/Flutter/Flutter.framework
+flutter_app/ios/Flutter/Flutter.podspec
+flutter_app/ios/Runner.xcworkspace/xcuserdata/
+
+# ─── Python / Server ──────────────────────────────────────────────────────────
+server/__pycache__/
+server/*.pyc
+server/.venv/
+server/venv/
+server/.env
+
+# ─── Infrastructure / BD ──────────────────────────────────────────────────────
+BD/.env
+BD/scripts/*.log
+common/.secrets
+WatchTracker/
+
+# ─── OS / editors ─────────────────────────────────────────────────────────────
 .DS_Store
-/build
-/.gradle
-/.idea
-/local.properties
-**/build
+Thumbs.db
+.idea/
 *.iml
-**/.env
-**/.secrets
-/.agent
-/captures
-.externalNativeBuild
-.cxx
-local.properties

@@ -1,5 +1,3 @@
-import json
-import re
 import hashlib
 import hmac
 import os
@@ -11,7 +9,6 @@ from psycopg2.extras import execute_values
 
 from db import cursor
 from schemas import (
-    AnimeStructureIn,
     EpisodeProgressItemIn,
     WatchlistItemIn,
 )
@@ -20,31 +17,30 @@ TOKEN_TTL_HOURS = int(os.getenv("AUTH_TOKEN_TTL_HOURS", "1"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_TTL_DAYS", "30"))
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "24"))
 PASSWORD_RESET_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_TTL_MINUTES", "30"))
-AUTH_TOKEN_PURGE_RETENTION_DAYS = int(os.getenv("AUTH_TOKEN_PURGE_RETENTION_DAYS", "30"))
-AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS", "30"))
-EMAIL_VERIFICATION_PURGE_RETENTION_DAYS = int(os.getenv("EMAIL_VERIFICATION_PURGE_RETENTION_DAYS", "7"))
-PASSWORD_RESET_PURGE_RETENTION_DAYS = int(os.getenv("PASSWORD_RESET_PURGE_RETENTION_DAYS", "7"))
-EMAIL_DELIVERY_LOG_RETENTION_DAYS = int(os.getenv("EMAIL_DELIVERY_LOG_RETENTION_DAYS", "30"))
+AUTH_TOKEN_PURGE_RETENTION_DAYS = int(
+    os.getenv("AUTH_TOKEN_PURGE_RETENTION_DAYS", "30")
+)
+AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS = int(
+    os.getenv("AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS", "30")
+)
+EMAIL_VERIFICATION_PURGE_RETENTION_DAYS = int(
+    os.getenv("EMAIL_VERIFICATION_PURGE_RETENTION_DAYS", "7")
+)
+PASSWORD_RESET_PURGE_RETENTION_DAYS = int(
+    os.getenv("PASSWORD_RESET_PURGE_RETENTION_DAYS", "7")
+)
+EMAIL_DELIVERY_LOG_RETENTION_DAYS = int(
+    os.getenv("EMAIL_DELIVERY_LOG_RETENTION_DAYS", "30")
+)
 PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", "5"))
-
-
-def normalize_title(value: str) -> str:
-    return re.sub(r"[\W_]+", "", value.lower(), flags=re.UNICODE)
-
-
-def _normalize_payload(value: Any) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return value
-    return value
 
 
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     rounds = 150_000
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+    ).hex()
     return f"pbkdf2_sha256${rounds}${salt}${digest}"
 
 
@@ -56,7 +52,9 @@ def _verify_password(password: str, encoded: str) -> bool:
         rounds = int(rounds_text)
     except (ValueError, TypeError):
         return False
-    check = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    check = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+    ).hex()
     return hmac.compare_digest(check, digest)
 
 
@@ -105,7 +103,9 @@ def _issue_access_token(cur, user_id: int) -> str:
     return access_token
 
 
-def _issue_refresh_token(cur, user_id: int, family_id: Optional[str] = None) -> tuple[str, str]:
+def _issue_refresh_token(
+    cur, user_id: int, family_id: Optional[str] = None
+) -> tuple[str, str]:
     refresh_token = secrets.token_urlsafe(48)
     token_hash = _hash_token(refresh_token)
     resolved_family_id = family_id or secrets.token_hex(16)
@@ -120,9 +120,13 @@ def _issue_refresh_token(cur, user_id: int, family_id: Optional[str] = None) -> 
     return refresh_token, resolved_family_id
 
 
-def _issue_session_tokens(cur, user_id: int, family_id: Optional[str] = None) -> dict[str, Any]:
+def _issue_session_tokens(
+    cur, user_id: int, family_id: Optional[str] = None
+) -> dict[str, Any]:
     access_token = _issue_access_token(cur, user_id)
-    refresh_token, resolved_family_id = _issue_refresh_token(cur, user_id, family_id=family_id)
+    refresh_token, resolved_family_id = _issue_refresh_token(
+        cur, user_id, family_id=family_id
+    )
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -141,8 +145,7 @@ def purge_expired_tokens() -> int:
                     revoked_at IS NOT NULL
                 AND revoked_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
+            """,
             (AUTH_TOKEN_PURGE_RETENTION_DAYS, AUTH_TOKEN_PURGE_RETENTION_DAYS),
         )
         deleted_auth_tokens = cur.rowcount
@@ -155,7 +158,10 @@ def purge_expired_tokens() -> int:
                 AND revoked_at <= now() - make_interval(days => %s)
                )
             """,
-            (AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS, AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS),
+            (
+                AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS,
+                AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS,
+            ),
         )
         cur.execute(
             """
@@ -165,9 +171,11 @@ def purge_expired_tokens() -> int:
                     used_at IS NOT NULL
                 AND used_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
-            (EMAIL_VERIFICATION_PURGE_RETENTION_DAYS, EMAIL_VERIFICATION_PURGE_RETENTION_DAYS),
+            """,
+            (
+                EMAIL_VERIFICATION_PURGE_RETENTION_DAYS,
+                EMAIL_VERIFICATION_PURGE_RETENTION_DAYS,
+            ),
         )
         cur.execute(
             """
@@ -177,8 +185,7 @@ def purge_expired_tokens() -> int:
                     used_at IS NOT NULL
                 AND used_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
+            """,
             (PASSWORD_RESET_PURGE_RETENTION_DAYS, PASSWORD_RESET_PURGE_RETENTION_DAYS),
         )
         cur.execute(
@@ -188,28 +195,26 @@ def purge_expired_tokens() -> int:
             """,
             (EMAIL_DELIVERY_LOG_RETENTION_DAYS,),
         )
-        cur.execute(
-            """
+        cur.execute("""
             DELETE FROM auth_rate_limit_states
             WHERE last_failure_at <= now() - interval '2 days'
-            """
-        )
+            """)
         return deleted_auth_tokens
 
 
-def reserve_email_delivery_slot(email_type: str, daily_limit: int) -> Optional[dict[str, int]]:
+def reserve_email_delivery_slot(
+    email_type: str, daily_limit: int
+) -> Optional[dict[str, int]]:
     if daily_limit <= 0:
         return None
     with cursor() as cur:
         cur.execute("LOCK TABLE email_delivery_events IN SHARE ROW EXCLUSIVE MODE")
-        cur.execute(
-            """
+        cur.execute("""
             SELECT COUNT(*) AS sent_count
             FROM email_delivery_events
             WHERE quota_day = CURRENT_DATE
               AND status IN ('reserved', 'sent')
-            """
-        )
+            """)
         sent_count = int(cur.fetchone()["sent_count"])
         if sent_count >= daily_limit:
             return None
@@ -239,7 +244,9 @@ def complete_email_delivery_slot(slot_id: int, delivered: bool) -> None:
         )
 
 
-def get_rate_limit_retry_after(endpoint: str, scope_key: str) -> tuple[float, Optional[int]]:
+def get_rate_limit_retry_after(
+    endpoint: str, scope_key: str
+) -> tuple[float, Optional[int]]:
     with cursor() as cur:
         cur.execute(
             """
@@ -294,7 +301,10 @@ def register_rate_limit_failure(
             first_failure_at = row["first_failure_at"] or now
             last_failure_at = row["last_failure_at"]
             blocked_until = row["blocked_until"]
-            if last_failure_at is None or (now - last_failure_at).total_seconds() > window_seconds:
+            if (
+                last_failure_at is None
+                or (now - last_failure_at).total_seconds() > window_seconds
+            ):
                 failure_count = 0
                 blocked_until = None
                 first_failure_at = now
@@ -321,7 +331,11 @@ def register_rate_limit_failure(
             (endpoint, scope_key, failure_count, first_failure_at, now, blocked_until),
         )
         remaining_attempts = max(0, free_attempts - failure_count)
-        blocked_until_epoch = int(blocked_until.timestamp()) if blocked_until is not None and blocked_until > now else None
+        blocked_until_epoch = (
+            int(blocked_until.timestamp())
+            if blocked_until is not None and blocked_until > now
+            else None
+        )
         return delay, remaining_attempts, blocked_until_epoch
 
 
@@ -396,7 +410,10 @@ def register_user(email: str, password: str) -> dict[str, Any]:
     if policy_error is not None:
         raise ValueError(policy_error)
     with cursor() as cur:
-        cur.execute("SELECT id, email_verified_at FROM users WHERE username = %s LIMIT 1", (normalized_email,))
+        cur.execute(
+            "SELECT id, email_verified_at FROM users WHERE username = %s LIMIT 1",
+            (normalized_email,),
+        )
         existing_user = cur.fetchone()
         if existing_user is not None:
             if existing_user["email_verified_at"] is not None:
@@ -419,7 +436,11 @@ def register_user(email: str, password: str) -> dict[str, Any]:
                 """,
                 (existing_user["id"], password_hash),
             )
-            return {"user_id": existing_user["id"], "email": normalized_email, "created_new": False}
+            return {
+                "user_id": existing_user["id"],
+                "email": normalized_email,
+                "created_new": False,
+            }
         password_hash = _hash_password(password)
         cur.execute(
             """
@@ -553,7 +574,10 @@ def create_verification_token_for_email(email: str) -> Optional[dict[str, str]]:
         row = cur.fetchone()
         if row is None:
             return None
-    return {"email": row["username"], "token": create_email_verification_token(row["id"])}
+    return {
+        "email": row["username"],
+        "token": create_email_verification_token(row["id"]),
+    }
 
 
 def create_password_reset_token_for_email(email: str) -> Optional[dict[str, str]]:
@@ -610,7 +634,9 @@ def rotate_refresh_token(refresh_token: str) -> Optional[dict[str, Any]]:
         row = cur.fetchone()
         if row is None:
             return None
-        new_tokens = _issue_session_tokens(cur, row["user_id"], family_id=row["family_id"])
+        new_tokens = _issue_session_tokens(
+            cur, row["user_id"], family_id=row["family_id"]
+        )
         new_refresh_hash = _hash_token(new_tokens["refresh_token"])
         cur.execute(
             """
@@ -678,7 +704,9 @@ def reset_password_with_token(token: str, password: str) -> str:
         return "updated"
 
 
-def change_password_for_user(user_id: int, current_password: str, new_password: str) -> str:
+def change_password_for_user(
+    user_id: int, current_password: str, new_password: str
+) -> str:
     policy_error = _validate_password_policy(new_password)
     if policy_error is not None:
         return policy_error
@@ -770,8 +798,12 @@ def get_user_profile(user_id: int) -> Optional[dict[str, Any]]:
         }
 
 
-def update_user_display_name(user_id: int, display_name: Optional[str]) -> Optional[dict[str, Any]]:
-    normalized_display_name = display_name.strip() if isinstance(display_name, str) else None
+def update_user_display_name(
+    user_id: int, display_name: Optional[str]
+) -> Optional[dict[str, Any]]:
+    normalized_display_name = (
+        display_name.strip() if isinstance(display_name, str) else None
+    )
     if normalized_display_name == "":
         normalized_display_name = None
     with cursor() as cur:
@@ -794,29 +826,50 @@ def update_user_display_name(user_id: int, display_name: Optional[str]) -> Optio
         }
 
 
-def list_watchlist(user_id: int, content_category: Optional[str] = None) -> list[dict[str, Any]]:
+def list_watchlist(
+    user_id: int, content_category: Optional[str] = None
+) -> list[dict[str, Any]]:
+    return list_watchlist_since(user_id, content_category, None)
+
+
+def list_watchlist_since(
+    user_id: int,
+    content_category: Optional[str] = None,
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    params: list[Any] = [user_id]
+    since_clause = ""
+    if since is not None:
+        params.append(since)
+        since_clause = " AND updated_at > %s"
     if content_category:
+        params.append(content_category)
         with cursor() as cur:
             cur.execute(
                 """
-                SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at
+                SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
                 FROM watchlist
-                WHERE user_id = %s AND content_category = %s
+                WHERE user_id = %s"""
+                + since_clause
+                + """
+                  AND content_category = %s
                 ORDER BY added_at DESC
                 """,
-                (user_id, content_category),
+                tuple(params),
             )
             return list(cur.fetchall())
 
     with cursor() as cur:
         cur.execute(
             """
-            SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at
+            SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             FROM watchlist
-            WHERE user_id = %s
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY added_at DESC
             """,
-            (user_id,),
+            tuple(params),
         )
         return list(cur.fetchall())
 
@@ -825,16 +878,23 @@ def upsert_watchlist(user_id: int, item: WatchlistItemIn) -> dict[str, Any]:
     with cursor() as cur:
         cur.execute(
             """
-            INSERT INTO watchlist (user_id, id, title, poster_path, media_type, content_category, content_status, total_episodes)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id, id, media_type)
+            DELETE FROM watchlist_tombstones
+            WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
+            """,
+            (user_id, item.id, item.media_type, item.content_category),
+        )
+        cur.execute(
+            """
+            INSERT INTO watchlist (user_id, id, title, poster_path, media_type, content_category, content_status, total_episodes, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, id, media_type, content_category)
             DO UPDATE SET
                 title = EXCLUDED.title,
                 poster_path = EXCLUDED.poster_path,
-                content_category = EXCLUDED.content_category,
                 content_status = EXCLUDED.content_status,
-                total_episodes = EXCLUDED.total_episodes
-            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at
+                total_episodes = EXCLUDED.total_episodes,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             """,
             (
                 user_id,
@@ -850,8 +910,19 @@ def upsert_watchlist(user_id: int, item: WatchlistItemIn) -> dict[str, Any]:
         return dict(cur.fetchone())
 
 
-def delete_watchlist(user_id: int, media_id: int, media_type: str, content_category: str) -> None:
+def delete_watchlist(
+    user_id: int, media_id: int, media_type: str, content_category: str
+) -> None:
     with cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO watchlist_tombstones (user_id, id, media_type, content_category, deleted_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, id, media_type, content_category)
+            DO UPDATE SET deleted_at = EXCLUDED.deleted_at
+            """,
+            (user_id, media_id, media_type, content_category),
+        )
         cur.execute(
             """
             DELETE FROM watchlist
@@ -861,14 +932,20 @@ def delete_watchlist(user_id: int, media_id: int, media_type: str, content_categ
         )
 
 
-def update_watch_status(user_id: int, media_id: int, media_type: str, content_category: str, content_status: str) -> Optional[dict[str, Any]]:
+def update_watch_status(
+    user_id: int,
+    media_id: int,
+    media_type: str,
+    content_category: str,
+    content_status: str,
+) -> Optional[dict[str, Any]]:
     with cursor() as cur:
         cur.execute(
             """
             UPDATE watchlist
-            SET content_status = %s
+            SET content_status = %s, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
-            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at
+            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             """,
             (content_status, user_id, media_id, media_type, content_category),
         )
@@ -876,14 +953,20 @@ def update_watch_status(user_id: int, media_id: int, media_type: str, content_ca
         return dict(row) if row else None
 
 
-def update_watch_total(user_id: int, media_id: int, media_type: str, content_category: str, total_episodes: int) -> Optional[dict[str, Any]]:
+def update_watch_total(
+    user_id: int,
+    media_id: int,
+    media_type: str,
+    content_category: str,
+    total_episodes: int,
+) -> Optional[dict[str, Any]]:
     with cursor() as cur:
         cur.execute(
             """
             UPDATE watchlist
-            SET total_episodes = %s
+            SET total_episodes = %s, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
-            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at
+            RETURNING id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             """,
             (total_episodes, user_id, media_id, media_type, content_category),
         )
@@ -892,34 +975,121 @@ def update_watch_total(user_id: int, media_id: int, media_type: str, content_cat
 
 
 def list_episode_progress(user_id: int, media_id: int) -> list[dict[str, Any]]:
+    return list_episode_progress_since(user_id, media_id, None)
+
+
+def list_episode_progress_since(
+    user_id: int,
+    media_id: int,
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
     with cursor() as cur:
+        params: list[Any] = [user_id, media_id]
+        since_clause = ""
+        if since is not None:
+            params.append(since)
+            since_clause = " AND updated_at > %s"
         cur.execute(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at
             FROM episode_progress
-            WHERE user_id = %s AND media_id = %s
+            WHERE user_id = %s AND media_id = %s"""
+            + since_clause
+            + """
             ORDER BY season_number, episode_number
             """,
-            (user_id, media_id),
+            tuple(params),
         )
         return list(cur.fetchall())
 
 
 def list_all_episode_progress(user_id: int) -> list[dict[str, Any]]:
+    return list_all_episode_progress_since(user_id, None)
+
+
+def list_all_episode_progress_since(
+    user_id: int,
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
     with cursor() as cur:
+        params: list[Any] = [user_id]
+        since_clause = ""
+        if since is not None:
+            params.append(since)
+            since_clause = " AND updated_at > %s"
         cur.execute(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at
             FROM episode_progress
-            WHERE user_id = %s
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY media_id, season_number, episode_number
             """,
-            (user_id,),
+            tuple(params),
         )
         return list(cur.fetchall())
 
 
-def replace_episode_progress(user_id: int, media_id: int, items: list[EpisodeProgressItemIn]) -> None:
+def list_watchlist_tombstones(user_id: int) -> list[dict[str, Any]]:
+    return list_watchlist_tombstones_since(user_id, None)
+
+
+def list_watchlist_tombstones_since(
+    user_id: int,
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    with cursor() as cur:
+        params: list[Any] = [user_id]
+        since_clause = ""
+        if since is not None:
+            params.append(since)
+            since_clause = " AND deleted_at > %s"
+        cur.execute(
+            """
+            SELECT id, media_type, content_category, deleted_at
+            FROM watchlist_tombstones
+            WHERE user_id = %s"""
+            + since_clause
+            + """
+            ORDER BY deleted_at DESC
+            """,
+            tuple(params),
+        )
+        return list(cur.fetchall())
+
+
+def list_episode_progress_tombstones_since(
+    user_id: int,
+    since: Optional[datetime] = None,
+) -> list[dict[str, Any]]:
+    with cursor() as cur:
+        params: list[Any] = [user_id]
+        since_clause = ""
+        if since is not None:
+            params.append(since)
+            since_clause = " AND deleted_at > %s"
+        cur.execute(
+            """
+            SELECT media_id, season_number, episode_number, deleted_at
+            FROM episode_progress_tombstones
+            WHERE user_id = %s"""
+            + since_clause
+            + """
+            ORDER BY deleted_at DESC
+            """,
+            tuple(params),
+        )
+        return list(cur.fetchall())
+
+
+def list_episode_progress_tombstones(user_id: int) -> list[dict[str, Any]]:
+    return list_episode_progress_tombstones_since(user_id, None)
+
+
+def replace_episode_progress(
+    user_id: int, media_id: int, items: list[EpisodeProgressItemIn]
+) -> None:
     if not items:
         return
     values = [
@@ -933,65 +1103,32 @@ def replace_episode_progress(user_id: int, media_id: int, items: list[EpisodePro
             INSERT INTO episode_progress (user_id, media_id, season_number, episode_number, is_watched)
             VALUES %s
             ON CONFLICT (user_id, media_id, season_number, episode_number)
-            DO UPDATE SET is_watched = EXCLUDED.is_watched, updated_at = CURRENT_DATE
+            DO UPDATE SET is_watched = EXCLUDED.is_watched, updated_at = CURRENT_TIMESTAMP
             """,
             values,
         )
 
 
-def list_anime_structures() -> list[dict[str, Any]]:
+def delete_episode_progress(
+    user_id: int,
+    media_id: int,
+    season_number: int,
+    episode_number: int,
+) -> None:
     with cursor() as cur:
         cur.execute(
             """
-            SELECT normalized_title, season, season_year, payload_json, updated_at
-            FROM anime_structures
-            ORDER BY normalized_title
-            """
-        )
-        rows = list(cur.fetchall())
-        for row in rows:
-            row["payload_json"] = _normalize_payload(row.get("payload_json"))
-        return rows
-
-
-def get_anime_structure(normalized_title: str) -> Optional[dict[str, Any]]:
-    with cursor() as cur:
-        cur.execute(
-            """
-            SELECT normalized_title, season, season_year, payload_json, updated_at
-            FROM anime_structures
-            WHERE normalized_title = %s
-            LIMIT 1
+            INSERT INTO episode_progress_tombstones (user_id, media_id, season_number, episode_number, deleted_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, media_id, season_number, episode_number)
+            DO UPDATE SET deleted_at = EXCLUDED.deleted_at
             """,
-            (normalized_title,),
+            (user_id, media_id, season_number, episode_number),
         )
-        row = cur.fetchone()
-        if not row:
-            return None
-        row = dict(row)
-        row["payload_json"] = _normalize_payload(row.get("payload_json"))
-        return row
-
-
-def upsert_anime_structure(item: AnimeStructureIn) -> dict[str, Any]:
-    normalized_title = normalize_title(item.title)
-    payload_json = item.model_dump()
-
-    with cursor() as cur:
         cur.execute(
             """
-            INSERT INTO anime_structures (normalized_title, season, season_year, payload_json)
-            VALUES (%s, %s, %s, %s::jsonb)
-            ON CONFLICT (normalized_title)
-            DO UPDATE SET
-                season = EXCLUDED.season,
-                season_year = EXCLUDED.season_year,
-                payload_json = EXCLUDED.payload_json,
-                updated_at = CURRENT_DATE
-            RETURNING normalized_title, season, season_year, payload_json, updated_at
+            DELETE FROM episode_progress
+            WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
             """,
-            (normalized_title, item.season, item.season_year, json.dumps(payload_json)),
+            (user_id, media_id, season_number, episode_number),
         )
-        row = dict(cur.fetchone())
-        row["payload_json"] = _normalize_payload(row.get("payload_json"))
-        return row

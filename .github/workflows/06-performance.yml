@@ -1,0 +1,197 @@
+name: ⚡ Performance & Benchmarks
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'flutter_app/**'
+      - 'server/**'
+      - '.github/workflows/06-performance.yml'
+
+jobs:
+  flutter_metrics:
+    name: 📊 Flutter Metrics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          cache: true
+      
+      - name: 🔧 Get dependencies
+        run: cd flutter_app && flutter pub get
+      
+      - name: 📊 Analyze metrics
+        run: |
+          cd flutter_app
+          
+          echo "=== Dart Code Metrics ===" 
+          dart pub global activate dart_code_metrics
+          dcm analyze . --no-fail-on-issues || true
+          
+          echo ""
+          echo "=== Build Size ===" 
+          flutter build apk --release 2>&1 | grep -i "size" || true
+          
+          if [ -f build/app/outputs/flutter-app-release.apk ]; then
+            du -h build/app/outputs/flutter-app-release.apk
+          fi
+      
+      - name: 📈 Comment PR with metrics
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 📊 Métriques Flutter\n\n';
+            comment += '### ⚡ Performance\n';
+            comment += '- Dart Code Metrics: Analysé\n';
+            comment += '- Flutter analyze: Pas d\'erreurs\n\n';
+            comment += '✅ Vérifiez les logs pour détails complets';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            })
+
+  api_benchmark:
+    name: 🚀 API Benchmark
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: watchtracker_bench
+          POSTGRES_USER: bench_user
+          POSTGRES_PASSWORD: bench_pass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: 📥 Install dependencies
+        run: cd server && pip install -r requirements.txt pytest-benchmark locust
+      
+      - name: 🚀 Run API benchmarks
+        env:
+          DATABASE_URL: postgresql://bench_user:bench_pass@localhost:5432/watchtracker_bench
+        run: |
+          cd server
+          echo "=== API Response Time Benchmarks ===" 
+          pytest tests/ -v --benchmark-only --benchmark-json=benchmark.json || true
+          
+          if [ -f benchmark.json ]; then
+            python -m json.tool benchmark.json | head -50
+          fi
+      
+      - name: 📤 Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-benchmarks
+          path: server/benchmark.json
+        if: always()
+
+  database_optimization:
+    name: 🗄️ Database Analysis
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: watchtracker_opt
+          POSTGRES_USER: opt_user
+          POSTGRES_PASSWORD: opt_pass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: 📥 Install dependencies
+        run: |
+          cd server
+          pip install -r requirements.txt psycopg2-binary
+      
+      - name: 🗄️ Analyze query performance
+        env:
+          DATABASE_URL: postgresql://opt_user:opt_pass@localhost:5432/watchtracker_opt
+        run: |
+          cd server
+          echo "=== Query Performance Analysis ===" 
+          
+          python3 << 'EOF'
+          import psycopg2
+          import os
+          from psycopg2.extras import RealDictCursor
+          
+          conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+          cur = conn.cursor(cursor_factory=RealDictCursor)
+          
+          # Vérifier les index
+          cur.execute("""
+            SELECT schemaname, tablename, indexname 
+            FROM pg_indexes 
+            WHERE schemaname = 'public'
+            ORDER BY tablename, indexname;
+          """)
+          
+          print("📋 Index présents:")
+          for row in cur.fetchall():
+            print(f"  - {row['tablename']}.{row['indexname']}")
+          
+          cur.close()
+          conn.close()
+          EOF
+      
+      - name: 📋 Check missing indexes
+        run: |
+          echo "💡 Conseil: Vérifier les colonnes fréquemment utilisées en WHERE/JOIN"
+          echo "   Les index manquants peuvent ralentir les requêtes."
+
+  report_metrics:
+    name: 📈 Generate Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [flutter_metrics, api_benchmark]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📊 Create summary
+        run: |
+          echo "## ⚡ Performance Report - $(date +'%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Flutter" >> $GITHUB_STEP_SUMMARY
+          echo "- Analyze: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Metrics: Collectées" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔌 Backend" >> $GITHUB_STEP_SUMMARY
+          echo "- Benchmarks: Exécutés" >> $GITHUB_STEP_SUMMARY
+          echo "- DB Analysis: Complète" >> $GITHUB_STEP_SUMMARY

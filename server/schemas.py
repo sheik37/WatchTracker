@@ -27,27 +27,6 @@ class EpisodeProgressItemIn(BaseModel):
     is_watched: bool
 
 
-class AnimeStructureSeasonIn(BaseModel):
-    season_number: int = Field(ge=1)
-    name: str
-    start_episode: int = Field(ge=1)
-    end_episode: int = Field(ge=1)
-
-
-class AnimeStructureIn(BaseModel):
-    title: str
-    aliases: list[str] = Field(default_factory=list)
-    season: Optional[Literal["WINTER", "SPRING", "SUMMER", "FALL"]] = None
-    season_year: Optional[int] = None
-    seasons: list[AnimeStructureSeasonIn] = Field(default_factory=list)
-
-
-class AnimeStructureOut(AnimeStructureIn):
-    normalized_title: str
-    payload_json: dict[str, Any]
-    updated_at: Optional[str] = None
-
-
 class HealthResponse(BaseModel):
     status: str
 
@@ -112,5 +91,8 @@ class AuthMeOut(BaseModel):
 
 
 class SyncSnapshotOut(BaseModel):
+    snapshot_at: int
     watchlist: list[dict[str, Any]] = Field(default_factory=list)
     episode_progress: list[dict[str, Any]] = Field(default_factory=list)
+    watchlist_tombstones: list[dict[str, Any]] = Field(default_factory=list)
+    episode_progress_tombstones: list[dict[str, Any]] = Field(default_factory=list)

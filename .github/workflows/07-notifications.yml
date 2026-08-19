@@ -1,0 +1,158 @@
+name: 🔔 Notifications & Alertes
+
+on:
+  workflow_run:
+    workflows: ['📱 CI Flutter', '🔌 CI Backend API']
+    types: [completed]
+
+jobs:
+  notify_on_failure:
+    name: 🔴 Alert on Failure
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'failure'
+    steps:
+      - name: 📤 Get workflow info
+        id: workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            console.log('Workflow failed:', run.name);
+            console.log('Branch:', run.head_branch);
+            console.log('Commit:', run.head_commit.message);
+            
+            return {
+              name: run.name,
+              branch: run.head_branch,
+              commit: run.head_commit.message,
+              author: run.head_commit.author.name,
+              url: run.html_url
+            }
+      
+      - name: 📧 Send email alert (optionnel)
+        if: secrets.ALERT_EMAIL != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USER }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: '🔴 Build Failed - WatchTracker'
+          to: ${{ secrets.ALERT_EMAIL }}
+          from: 'github-actions@watchtracker.local'
+          body: |
+            Workflow: ${{ steps.workflow.outputs.name }}
+            Branch: ${{ steps.workflow.outputs.branch }}
+            Commit: ${{ steps.workflow.outputs.commit }}
+            Author: ${{ steps.workflow.outputs.author }}
+            
+            URL: ${{ steps.workflow.outputs.url }}
+      
+      - name: 💬 Send Slack notification (optionnel)
+        if: secrets.SLACK_WEBHOOK != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "🔴 Build Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*WatchTracker - Build Failed* 🔴\n*Workflow:* ${{ github.event.workflow_run.name }}\n*Branch:* ${{ github.event.workflow_run.head_branch }}\n*Commit:* ${{ github.event.workflow_run.head_commit.message }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "Voir les logs"
+                      },
+                      "url": "${{ github.event.workflow_run.html_url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+  notify_on_success:
+    name: 🟢 Alert on Success
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
+    steps:
+      - name: 💬 Send Slack success (optionnel)
+        if: secrets.SLACK_WEBHOOK != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ Build Success",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*WatchTracker - Build réussi* ✅\n*Workflow:* ${{ github.event.workflow_run.name }}\n*Branch:* ${{ github.event.workflow_run.head_branch }}"
+                  }
+                }
+              ]
+            }
+
+  create_issue_on_failure:
+    name: 🐛 Create Issue on Failure
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🐛 Create bug issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            
+            const title = `🔴 Build Failed: ${run.name}`;
+            const body = `## Build Failure Report
+            
+Workflow: **${run.name}**
+Branch: **${run.head_branch}**
+Commit: ${run.head_commit.sha}
+Author: ${run.head_commit.author.name}
+
+[Voir les logs complets](${run.html_url})
+
+---
+*Issue créée automatiquement par GitHub Actions*
+            `;
+            
+            // Chercher un issue existant
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['ci-failure']
+            });
+            
+            // Créer seulement s'il n'existe pas d'issue recent
+            const recentIssue = issues.data.find(issue => 
+              issue.created_at > new Date(Date.now() - 6*3600*1000).toISOString()
+            );
+            
+            if (!recentIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['ci-failure', 'bug']
+              });
+              console.log('Issue créée');
+            } else {
+              console.log('Issue existante trouvée, skipped');
+            }

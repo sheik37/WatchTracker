@@ -1,0 +1,111 @@
+name: 📱 CI Flutter
+
+on:
+  push:
+    branches: [main, develop, feature/**]
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/01-flutter-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'flutter_app/**'
+
+jobs:
+  analyze:
+    name: 🔍 Analyze & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+      
+      - name: 🔧 Get dependencies
+        run: cd flutter_app && flutter pub get
+      
+      - name: 📊 Analyze
+        run: cd flutter_app && flutter analyze --no-pub --fatal-infos
+      
+      - name: ✨ Format check
+        run: cd flutter_app && dart format --set-exit-if-changed .
+
+  test:
+    name: 🧪 Unit & Widget Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+      
+      - name: 🔧 Get dependencies
+        run: cd flutter_app && flutter pub get
+      
+      - name: 🧪 Run tests
+        run: cd flutter_app && flutter test --coverage
+      
+      - name: 📊 Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./flutter_app/coverage/lcov.info
+          flags: flutter
+        if: always()
+
+  build_apk:
+    name: 🏗️ Build APK
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+      
+      - name: 🔧 Get dependencies
+        run: cd flutter_app && flutter pub get
+      
+      - name: 🏗️ Build APK
+        run: cd flutter_app && flutter build apk --release
+      
+      - name: 📤 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-app-apk
+          path: flutter_app/build/app/outputs/flutter-app-release.apk
+          retention-days: 30
+
+  build_ios:
+    name: 🍎 Build iOS
+    runs-on: macos-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+      
+      - name: 🔧 Get dependencies
+        run: cd flutter_app && flutter pub get
+      
+      - name: 🏗️ Build iOS
+        run: cd flutter_app && flutter build ios --release --no-codesign
+      
+      - name: 📤 Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-app-ios
+          path: flutter_app/build/ios/iphoneos/Runner.app
+          retention-days: 30

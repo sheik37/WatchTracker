@@ -1,0 +1,138 @@
+name: 🔄 Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Lundi 3:00 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  flutter_updates:
+    name: 🚀 Flutter Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📥 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          cache: true
+      
+      - name: 🔄 Check for updates
+        run: cd flutter_app && flutter pub upgrade --dry-run
+      
+      - name: 📤 Apply updates
+        id: update
+        run: |
+          cd flutter_app
+          flutter pub upgrade
+          if git diff --quiet pubspec.lock; then
+            echo "updates=false" >> $GITHUB_OUTPUT
+          else
+            echo "updates=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 📝 Create PR (if updates)
+        if: steps.update.outputs.updates == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore(flutter): mettre à jour les dépendances'
+          title: '🔄 Mise à jour automatique - dépendances Flutter'
+          body: |
+            ## 🔄 Mises à jour disponibles
+            
+            Mises à jour des dépendances Flutter détectées.
+            
+            ```
+            ${{ steps.update.outputs.updates }}
+            ```
+            
+            Veuillez vérifier les changements et tester avant fusion.
+          branch: chore/flutter-deps-update
+          delete-branch: true
+
+  python_updates:
+    name: 🐍 Python Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📥 Install pip-audit
+        run: pip install pip-audit poetry pip-tools
+      
+      - name: 🔍 Check for outdated packages
+        run: |
+          cd server
+          pip list --outdated --format=json > outdated.json || true
+          cat outdated.json
+      
+      - name: 🔄 Update requirements
+        id: update
+        run: |
+          cd server
+          pip install --upgrade pip setuptools wheel
+          pip-compile requirements.txt --upgrade --output-file=requirements-new.txt 2>&1 || true
+          
+          if ! diff -q requirements.txt requirements-new.txt > /dev/null 2>&1; then
+            mv requirements-new.txt requirements.txt
+            echo "updates=true" >> $GITHUB_OUTPUT
+          else
+            echo "updates=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 📝 Create PR (if updates)
+        if: steps.update.outputs.updates == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore(backend): mettre à jour les dépendances Python'
+          title: '🔄 Mise à jour automatique - dépendances Python'
+          body: |
+            ## 🔄 Mises à jour disponibles
+            
+            Mises à jour des dépendances Python détectées.
+            
+            Veuillez vérifier les changements, exécuter les tests et valider avant fusion.
+            
+            ### À vérifier:
+            - ✅ Tests passent (`pytest tests/`)
+            - ✅ Aucune incompatibilité connue
+            - ✅ Versions de sécurité critiques
+          branch: chore/python-deps-update
+          delete-branch: true
+
+  security_audit:
+    name: 🔐 Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📥 Install audit tools
+        run: pip install safety pip-audit bandit
+      
+      - name: 🔐 Run security audit
+        run: |
+          cd server
+          echo "=== pip-audit ==="
+          pip-audit || true
+          echo ""
+          echo "=== safety check ==="
+          safety check --json || true
+      
+      - name: 🔐 Run bandit
+        run: |
+          cd server
+          bandit -r . -f txt || true
