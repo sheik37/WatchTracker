@@ -18,8 +18,11 @@ jobs:
       - name: 🔍 Check line endings
         run: |
           echo "Vérifying LF on shell scripts..."
-          if find . -name "*.sh" -type f -exec grep -l $'\r' {} \; 2>/dev/null; then
-            echo "❌ CRLF found in shell scripts! Use: git config core.autocrlf false"
+          CRLF_FILES=$(find . -name "*.sh" -not -path "./.git/*" -type f -exec grep -l $'\r' {} \; 2>/dev/null)
+          if [ -n "$CRLF_FILES" ]; then
+            echo "❌ CRLF found in these shell scripts:"
+            echo "$CRLF_FILES"
+            echo "Use: git config core.autocrlf false"
             exit 1
           fi
           echo "✓ Tous les scripts sont en LF"
