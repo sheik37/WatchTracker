@@ -37,6 +37,7 @@
 - **Trigger**: Push sur tag `v*` ou lancement manuel
 - **Actions**:
   - 📦 Crée une release GitHub
+  - 🏷️ Utilise le tag comme source de vérité de version (`v2.0.0` → app `2.0.0`)
   - 🏗️ Build APK + upload à la release
   - 🍎 Build iOS sans signature + upload en artefact/release
   - 🐳 Build Docker image
