@@ -7,12 +7,6 @@
 - **Actions**:
   - 🔍 Analyze & Lint (flutter analyze, dart format)
   - 🧪 Tests unitaires & widgets (coverage)
-  - 🏗️ Build APK (main branch)
-  - 🍎 Build iOS (main branch)
-
-**Artefacts générés**:
-- APK release: `flutter-app-release.apk`
-- iOS build: `Runner.app`
 
 ---
 
@@ -40,11 +34,12 @@
 ---
 
 ### 4. **🚀 Auto-Release** (`04-release.yml`)
-- **Trigger**: Push sur `main`
+- **Trigger**: Push sur tag `v*` ou lancement manuel
 - **Actions**:
-  - 📦 Crée release automatique (Release Please)
+  - 📦 Crée une release GitHub
   - 🏗️ Build APK + upload à la release
-  - 🐳 Push Docker image avec tag version
+  - 🍎 Build iOS sans signature + upload en artefact/release
+  - 🐳 Build Docker image
 
 **Secrets requis** (optionnel pour Docker):
 ```
