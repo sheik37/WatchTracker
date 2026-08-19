@@ -11,8 +11,7 @@ class AppConfig {
   );
   static const updateManifestUrl = String.fromEnvironment(
     'UPDATE_MANIFEST_URL',
-    defaultValue:
-        'https://github.com/sheik37/WatchTracker/releases/latest/download/version.json',
+    defaultValue: 'https://github.com/sheik37/WatchTracker/releases/latest/download/version.json',
   );
   static const androidUpdateUrl = String.fromEnvironment(
     'ANDROID_UPDATE_URL',
