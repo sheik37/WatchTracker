@@ -34,9 +34,6 @@ jobs:
           include-v-in-tag: true
           bump-minor-pre-major: true
           default-branch: main
-          extra-files: |
-            flutter_app/pubspec.yaml:
-              updater-template: 'version: {{version}}+1'
 
   build_release_apk:
     name: 🏗️ Build Release APK
