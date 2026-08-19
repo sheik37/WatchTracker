@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # 🐳 Docker Hub Test Script
 # Teste votre configuration Docker Hub avant de déclencher GitHub Actions
 # Usage: bash test-docker-setup.sh

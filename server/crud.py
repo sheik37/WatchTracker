@@ -17,18 +17,30 @@ TOKEN_TTL_HOURS = int(os.getenv("AUTH_TOKEN_TTL_HOURS", "1"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_TTL_DAYS", "30"))
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "24"))
 PASSWORD_RESET_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_TTL_MINUTES", "30"))
-AUTH_TOKEN_PURGE_RETENTION_DAYS = int(os.getenv("AUTH_TOKEN_PURGE_RETENTION_DAYS", "30"))
-AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS", "30"))
-EMAIL_VERIFICATION_PURGE_RETENTION_DAYS = int(os.getenv("EMAIL_VERIFICATION_PURGE_RETENTION_DAYS", "7"))
-PASSWORD_RESET_PURGE_RETENTION_DAYS = int(os.getenv("PASSWORD_RESET_PURGE_RETENTION_DAYS", "7"))
-EMAIL_DELIVERY_LOG_RETENTION_DAYS = int(os.getenv("EMAIL_DELIVERY_LOG_RETENTION_DAYS", "30"))
+AUTH_TOKEN_PURGE_RETENTION_DAYS = int(
+    os.getenv("AUTH_TOKEN_PURGE_RETENTION_DAYS", "30")
+)
+AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS = int(
+    os.getenv("AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS", "30")
+)
+EMAIL_VERIFICATION_PURGE_RETENTION_DAYS = int(
+    os.getenv("EMAIL_VERIFICATION_PURGE_RETENTION_DAYS", "7")
+)
+PASSWORD_RESET_PURGE_RETENTION_DAYS = int(
+    os.getenv("PASSWORD_RESET_PURGE_RETENTION_DAYS", "7")
+)
+EMAIL_DELIVERY_LOG_RETENTION_DAYS = int(
+    os.getenv("EMAIL_DELIVERY_LOG_RETENTION_DAYS", "30")
+)
 PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", "5"))
 
 
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     rounds = 150_000
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+    ).hex()
     return f"pbkdf2_sha256${rounds}${salt}${digest}"
 
 
@@ -40,7 +52,9 @@ def _verify_password(password: str, encoded: str) -> bool:
         rounds = int(rounds_text)
     except (ValueError, TypeError):
         return False
-    check = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    check = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+    ).hex()
     return hmac.compare_digest(check, digest)
 
 
@@ -89,7 +103,9 @@ def _issue_access_token(cur, user_id: int) -> str:
     return access_token
 
 
-def _issue_refresh_token(cur, user_id: int, family_id: Optional[str] = None) -> tuple[str, str]:
+def _issue_refresh_token(
+    cur, user_id: int, family_id: Optional[str] = None
+) -> tuple[str, str]:
     refresh_token = secrets.token_urlsafe(48)
     token_hash = _hash_token(refresh_token)
     resolved_family_id = family_id or secrets.token_hex(16)
@@ -104,9 +120,13 @@ def _issue_refresh_token(cur, user_id: int, family_id: Optional[str] = None) -> 
     return refresh_token, resolved_family_id
 
 
-def _issue_session_tokens(cur, user_id: int, family_id: Optional[str] = None) -> dict[str, Any]:
+def _issue_session_tokens(
+    cur, user_id: int, family_id: Optional[str] = None
+) -> dict[str, Any]:
     access_token = _issue_access_token(cur, user_id)
-    refresh_token, resolved_family_id = _issue_refresh_token(cur, user_id, family_id=family_id)
+    refresh_token, resolved_family_id = _issue_refresh_token(
+        cur, user_id, family_id=family_id
+    )
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -125,8 +145,7 @@ def purge_expired_tokens() -> int:
                     revoked_at IS NOT NULL
                 AND revoked_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
+            """,
             (AUTH_TOKEN_PURGE_RETENTION_DAYS, AUTH_TOKEN_PURGE_RETENTION_DAYS),
         )
         deleted_auth_tokens = cur.rowcount
@@ -139,7 +158,10 @@ def purge_expired_tokens() -> int:
                 AND revoked_at <= now() - make_interval(days => %s)
                )
             """,
-            (AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS, AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS),
+            (
+                AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS,
+                AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS,
+            ),
         )
         cur.execute(
             """
@@ -149,9 +171,11 @@ def purge_expired_tokens() -> int:
                     used_at IS NOT NULL
                 AND used_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
-            (EMAIL_VERIFICATION_PURGE_RETENTION_DAYS, EMAIL_VERIFICATION_PURGE_RETENTION_DAYS),
+            """,
+            (
+                EMAIL_VERIFICATION_PURGE_RETENTION_DAYS,
+                EMAIL_VERIFICATION_PURGE_RETENTION_DAYS,
+            ),
         )
         cur.execute(
             """
@@ -161,8 +185,7 @@ def purge_expired_tokens() -> int:
                     used_at IS NOT NULL
                 AND used_at <= now() - make_interval(days => %s)
                )
-            """
-            ,
+            """,
             (PASSWORD_RESET_PURGE_RETENTION_DAYS, PASSWORD_RESET_PURGE_RETENTION_DAYS),
         )
         cur.execute(
@@ -172,28 +195,26 @@ def purge_expired_tokens() -> int:
             """,
             (EMAIL_DELIVERY_LOG_RETENTION_DAYS,),
         )
-        cur.execute(
-            """
+        cur.execute("""
             DELETE FROM auth_rate_limit_states
             WHERE last_failure_at <= now() - interval '2 days'
-            """
-        )
+            """)
         return deleted_auth_tokens
 
 
-def reserve_email_delivery_slot(email_type: str, daily_limit: int) -> Optional[dict[str, int]]:
+def reserve_email_delivery_slot(
+    email_type: str, daily_limit: int
+) -> Optional[dict[str, int]]:
     if daily_limit <= 0:
         return None
     with cursor() as cur:
         cur.execute("LOCK TABLE email_delivery_events IN SHARE ROW EXCLUSIVE MODE")
-        cur.execute(
-            """
+        cur.execute("""
             SELECT COUNT(*) AS sent_count
             FROM email_delivery_events
             WHERE quota_day = CURRENT_DATE
               AND status IN ('reserved', 'sent')
-            """
-        )
+            """)
         sent_count = int(cur.fetchone()["sent_count"])
         if sent_count >= daily_limit:
             return None
@@ -223,7 +244,9 @@ def complete_email_delivery_slot(slot_id: int, delivered: bool) -> None:
         )
 
 
-def get_rate_limit_retry_after(endpoint: str, scope_key: str) -> tuple[float, Optional[int]]:
+def get_rate_limit_retry_after(
+    endpoint: str, scope_key: str
+) -> tuple[float, Optional[int]]:
     with cursor() as cur:
         cur.execute(
             """
@@ -278,7 +301,10 @@ def register_rate_limit_failure(
             first_failure_at = row["first_failure_at"] or now
             last_failure_at = row["last_failure_at"]
             blocked_until = row["blocked_until"]
-            if last_failure_at is None or (now - last_failure_at).total_seconds() > window_seconds:
+            if (
+                last_failure_at is None
+                or (now - last_failure_at).total_seconds() > window_seconds
+            ):
                 failure_count = 0
                 blocked_until = None
                 first_failure_at = now
@@ -305,7 +331,11 @@ def register_rate_limit_failure(
             (endpoint, scope_key, failure_count, first_failure_at, now, blocked_until),
         )
         remaining_attempts = max(0, free_attempts - failure_count)
-        blocked_until_epoch = int(blocked_until.timestamp()) if blocked_until is not None and blocked_until > now else None
+        blocked_until_epoch = (
+            int(blocked_until.timestamp())
+            if blocked_until is not None and blocked_until > now
+            else None
+        )
         return delay, remaining_attempts, blocked_until_epoch
 
 
@@ -380,7 +410,10 @@ def register_user(email: str, password: str) -> dict[str, Any]:
     if policy_error is not None:
         raise ValueError(policy_error)
     with cursor() as cur:
-        cur.execute("SELECT id, email_verified_at FROM users WHERE username = %s LIMIT 1", (normalized_email,))
+        cur.execute(
+            "SELECT id, email_verified_at FROM users WHERE username = %s LIMIT 1",
+            (normalized_email,),
+        )
         existing_user = cur.fetchone()
         if existing_user is not None:
             if existing_user["email_verified_at"] is not None:
@@ -403,7 +436,11 @@ def register_user(email: str, password: str) -> dict[str, Any]:
                 """,
                 (existing_user["id"], password_hash),
             )
-            return {"user_id": existing_user["id"], "email": normalized_email, "created_new": False}
+            return {
+                "user_id": existing_user["id"],
+                "email": normalized_email,
+                "created_new": False,
+            }
         password_hash = _hash_password(password)
         cur.execute(
             """
@@ -537,7 +574,10 @@ def create_verification_token_for_email(email: str) -> Optional[dict[str, str]]:
         row = cur.fetchone()
         if row is None:
             return None
-    return {"email": row["username"], "token": create_email_verification_token(row["id"])}
+    return {
+        "email": row["username"],
+        "token": create_email_verification_token(row["id"]),
+    }
 
 
 def create_password_reset_token_for_email(email: str) -> Optional[dict[str, str]]:
@@ -594,7 +634,9 @@ def rotate_refresh_token(refresh_token: str) -> Optional[dict[str, Any]]:
         row = cur.fetchone()
         if row is None:
             return None
-        new_tokens = _issue_session_tokens(cur, row["user_id"], family_id=row["family_id"])
+        new_tokens = _issue_session_tokens(
+            cur, row["user_id"], family_id=row["family_id"]
+        )
         new_refresh_hash = _hash_token(new_tokens["refresh_token"])
         cur.execute(
             """
@@ -662,7 +704,9 @@ def reset_password_with_token(token: str, password: str) -> str:
         return "updated"
 
 
-def change_password_for_user(user_id: int, current_password: str, new_password: str) -> str:
+def change_password_for_user(
+    user_id: int, current_password: str, new_password: str
+) -> str:
     policy_error = _validate_password_policy(new_password)
     if policy_error is not None:
         return policy_error
@@ -754,8 +798,12 @@ def get_user_profile(user_id: int) -> Optional[dict[str, Any]]:
         }
 
 
-def update_user_display_name(user_id: int, display_name: Optional[str]) -> Optional[dict[str, Any]]:
-    normalized_display_name = display_name.strip() if isinstance(display_name, str) else None
+def update_user_display_name(
+    user_id: int, display_name: Optional[str]
+) -> Optional[dict[str, Any]]:
+    normalized_display_name = (
+        display_name.strip() if isinstance(display_name, str) else None
+    )
     if normalized_display_name == "":
         normalized_display_name = None
     with cursor() as cur:
@@ -778,7 +826,9 @@ def update_user_display_name(user_id: int, display_name: Optional[str]) -> Optio
         }
 
 
-def list_watchlist(user_id: int, content_category: Optional[str] = None) -> list[dict[str, Any]]:
+def list_watchlist(
+    user_id: int, content_category: Optional[str] = None
+) -> list[dict[str, Any]]:
     return list_watchlist_since(user_id, content_category, None)
 
 
@@ -799,7 +849,9 @@ def list_watchlist_since(
                 """
                 SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
                 FROM watchlist
-                WHERE user_id = %s""" + since_clause + """
+                WHERE user_id = %s"""
+                + since_clause
+                + """
                   AND content_category = %s
                 ORDER BY added_at DESC
                 """,
@@ -812,7 +864,9 @@ def list_watchlist_since(
             """
             SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             FROM watchlist
-            WHERE user_id = %s""" + since_clause + """
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY added_at DESC
             """,
             tuple(params),
@@ -856,7 +910,9 @@ def upsert_watchlist(user_id: int, item: WatchlistItemIn) -> dict[str, Any]:
         return dict(cur.fetchone())
 
 
-def delete_watchlist(user_id: int, media_id: int, media_type: str, content_category: str) -> None:
+def delete_watchlist(
+    user_id: int, media_id: int, media_type: str, content_category: str
+) -> None:
     with cursor() as cur:
         cur.execute(
             """
@@ -876,7 +932,13 @@ def delete_watchlist(user_id: int, media_id: int, media_type: str, content_categ
         )
 
 
-def update_watch_status(user_id: int, media_id: int, media_type: str, content_category: str, content_status: str) -> Optional[dict[str, Any]]:
+def update_watch_status(
+    user_id: int,
+    media_id: int,
+    media_type: str,
+    content_category: str,
+    content_status: str,
+) -> Optional[dict[str, Any]]:
     with cursor() as cur:
         cur.execute(
             """
@@ -891,7 +953,13 @@ def update_watch_status(user_id: int, media_id: int, media_type: str, content_ca
         return dict(row) if row else None
 
 
-def update_watch_total(user_id: int, media_id: int, media_type: str, content_category: str, total_episodes: int) -> Optional[dict[str, Any]]:
+def update_watch_total(
+    user_id: int,
+    media_id: int,
+    media_type: str,
+    content_category: str,
+    total_episodes: int,
+) -> Optional[dict[str, Any]]:
     with cursor() as cur:
         cur.execute(
             """
@@ -925,7 +993,9 @@ def list_episode_progress_since(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at
             FROM episode_progress
-            WHERE user_id = %s AND media_id = %s""" + since_clause + """
+            WHERE user_id = %s AND media_id = %s"""
+            + since_clause
+            + """
             ORDER BY season_number, episode_number
             """,
             tuple(params),
@@ -951,7 +1021,9 @@ def list_all_episode_progress_since(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at
             FROM episode_progress
-            WHERE user_id = %s""" + since_clause + """
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY media_id, season_number, episode_number
             """,
             tuple(params),
@@ -977,7 +1049,9 @@ def list_watchlist_tombstones_since(
             """
             SELECT id, media_type, content_category, deleted_at
             FROM watchlist_tombstones
-            WHERE user_id = %s""" + since_clause + """
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY deleted_at DESC
             """,
             tuple(params),
@@ -999,7 +1073,9 @@ def list_episode_progress_tombstones_since(
             """
             SELECT media_id, season_number, episode_number, deleted_at
             FROM episode_progress_tombstones
-            WHERE user_id = %s""" + since_clause + """
+            WHERE user_id = %s"""
+            + since_clause
+            + """
             ORDER BY deleted_at DESC
             """,
             tuple(params),
@@ -1011,7 +1087,9 @@ def list_episode_progress_tombstones(user_id: int) -> list[dict[str, Any]]:
     return list_episode_progress_tombstones_since(user_id, None)
 
 
-def replace_episode_progress(user_id: int, media_id: int, items: list[EpisodeProgressItemIn]) -> None:
+def replace_episode_progress(
+    user_id: int, media_id: int, items: list[EpisodeProgressItemIn]
+) -> None:
     if not items:
         return
     values = [

@@ -1,10 +1,10 @@
-import os
 import hashlib
 import hmac
+import os
 import secrets
 from contextlib import contextmanager
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -72,8 +72,7 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(schema_sql)
-            cur.execute(
-                """
+            cur.execute("""
                 DO $$
                 DECLARE legacy_user_id BIGINT;
                 BEGIN
@@ -317,8 +316,7 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                     );
                     DROP TABLE IF EXISTS anime_structures;
                 END $$;
-                """
-            )
+                """)
 
             admin_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "").strip().lower()
             admin_password = os.getenv("ADMIN_BOOTSTRAP_PASSWORD", "").strip()
@@ -361,7 +359,9 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             """,
                             (existing_admin["id"],),
                         )
-                    if not _verify_password(admin_password, existing_admin["password_hash"]):
+                    if not _verify_password(
+                        admin_password, existing_admin["password_hash"]
+                    ):
                         password_hash = _hash_password(admin_password)
                         cur.execute(
                             """
@@ -406,5 +406,7 @@ def _verify_password(password: str, encoded: str) -> bool:
         rounds = int(rounds_text)
     except (TypeError, ValueError):
         return False
-    check = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
+    check = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
+    ).hex()
     return hmac.compare_digest(check, digest)

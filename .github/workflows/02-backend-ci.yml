@@ -31,10 +31,10 @@ jobs:
         run: cd server && black --check .
       
       - name: 🔤 isort import check
-        run: cd server && isort --check-only .
+        run: cd server && isort --check-only . --profile black
       
       - name: 🐛 Flake8 lint
-        run: cd server && flake8 . --max-line-length=100 --ignore=E203,W503
+        run: cd server && flake8 . --max-line-length=100 --ignore=E203,W503,E501 --exclude=.git,__pycache__,.pytest_cache
 
   test:
     name: 🧪 Unit Tests

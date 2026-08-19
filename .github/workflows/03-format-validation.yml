@@ -27,7 +27,7 @@ jobs:
   commit_messages:
     name: 📝 Commit Messages
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,20 +36,29 @@ jobs:
       - name: 🔍 Check commit messages
         run: |
           echo "Vérifying commits are in French..."
-          # Pour main et develop: accepter les commits avec Copilot
-          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "✓ Main/develop: tous les commits acceptés"
+          FRENCH_KEYWORDS="feat|fix|docs|style|refactor|test|chore|perf|amélioration|ajout|correction|suppression"
+          BASE="${{ github.base_ref }}"
+          
+          COMMITS=$(git log origin/${BASE}..HEAD --format="%s" 2>/dev/null || true)
+          
+          if [ -z "$COMMITS" ]; then
+            echo "✓ Aucun commit à vérifier"
             exit 0
           fi
           
-          # Pour feature branches: vérifier que les messages commencent par mots-clés français
-          FRENCH_KEYWORDS="feat|fix|docs|style|refactor|test|chore|perf|amélioration|ajout|correction|suppression"
+          echo "Commits à vérifier:"
+          echo "$COMMITS"
           
-          git log origin/${{ github.base_ref }}..HEAD --format=%B | \
-            grep -E "^(${FRENCH_KEYWORDS}):" || {
-            echo "❌ Commits doivent commencer par: feat, fix, docs, style, refactor, test, chore, perf, amélioration, ajout, correction, suppression"
+          INVALID=$(echo "$COMMITS" | grep -vE "^(${FRENCH_KEYWORDS}):" | grep -v "^Merge " || true)
+          
+          if [ -n "$INVALID" ]; then
+            echo ""
+            echo "❌ Commits invalides trouvés:"
+            echo "$INVALID"
+            echo ""
+            echo "Les messages doivent commencer par: feat:, fix:, docs:, style:, refactor:, test:, chore:, perf:"
             exit 1
-          }
+          fi
           echo "✓ Messages de commits valides"
 
   trailing_whitespace:

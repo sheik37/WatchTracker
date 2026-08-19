@@ -1,4 +1,4 @@
-#!/bin/sh
+﻿#!/bin/sh
 
 json_escape() {
     printf '%s' "$1" | awk '
