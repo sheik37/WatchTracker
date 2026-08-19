@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-import psycopg2
+import psycopg2  # noqa: F401 - requis pour la compatibilité psycopg2.extras/pool
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
 
