@@ -27,12 +27,11 @@ jobs:
       
       - name: 🔖 Create release
         id: release
-        uses: google-github-actions/release-please-action@v4
+        uses: googleapis/release-please-action@v4
         with:
           target-branch: main
           release-type: simple
           include-v-in-tag: true
-          bump-minor-pre-major: true
           default-branch: main
 
   build_release_apk:
@@ -49,7 +48,7 @@ jobs:
       - name: 📥 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.47.0'
           cache: true
       
       - name: 🔧 Get dependencies
