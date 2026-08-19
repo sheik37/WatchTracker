@@ -41,13 +41,17 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Prepare APK asset
+        run: |
+          cp flutter_app/build/app/outputs/flutter-apk/app-release.apk "WatchTracker-${{ steps.version.outputs.tag }}.apk"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "WatchTracker ${{ steps.version.outputs.tag }}"
           generate_release_notes: true
-          files: flutter_app/build/app/outputs/flutter-app-release.apk
+          files: WatchTracker-${{ steps.version.outputs.tag }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
