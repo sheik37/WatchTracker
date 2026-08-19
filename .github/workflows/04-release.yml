@@ -56,7 +56,14 @@ jobs:
       - name: Build APK
         run: |
           cd flutter_app
-          flutter build apk --release --build-name="${{ needs.resolve_version.outputs.version }}" --build-number="${{ needs.resolve_version.outputs.build_number }}" --dart-define=APP_VERSION="${{ needs.resolve_version.outputs.version }}" --dart-define=APP_BUILD_NUMBER="${{ needs.resolve_version.outputs.build_number }}"
+          flutter build apk --release \
+            --build-name="${{ needs.resolve_version.outputs.version }}" \
+            --build-number="${{ needs.resolve_version.outputs.build_number }}" \
+            --dart-define=APP_VERSION="${{ needs.resolve_version.outputs.version }}" \
+            --dart-define=APP_BUILD_NUMBER="${{ needs.resolve_version.outputs.build_number }}" \
+            --dart-define=TMDB_API_KEY="${{ secrets.TMDB_API_KEY }}" \
+            --dart-define=TVDB_API_KEY="${{ secrets.TVDB_API_KEY }}" \
+            --dart-define=BACKEND_BASE_URL="${{ secrets.BACKEND_BASE_URL }}"
 
       - name: Prepare APK asset
         run: |
@@ -143,7 +150,14 @@ jobs:
       - name: Build iOS
         run: |
           cd flutter_app
-          flutter build ios --release --no-codesign --build-name="${{ needs.resolve_version.outputs.version }}" --build-number="${{ needs.resolve_version.outputs.build_number }}" --dart-define=APP_VERSION="${{ needs.resolve_version.outputs.version }}" --dart-define=APP_BUILD_NUMBER="${{ needs.resolve_version.outputs.build_number }}"
+          flutter build ios --release --no-codesign \
+            --build-name="${{ needs.resolve_version.outputs.version }}" \
+            --build-number="${{ needs.resolve_version.outputs.build_number }}" \
+            --dart-define=APP_VERSION="${{ needs.resolve_version.outputs.version }}" \
+            --dart-define=APP_BUILD_NUMBER="${{ needs.resolve_version.outputs.build_number }}" \
+            --dart-define=TMDB_API_KEY="${{ secrets.TMDB_API_KEY }}" \
+            --dart-define=TVDB_API_KEY="${{ secrets.TVDB_API_KEY }}" \
+            --dart-define=BACKEND_BASE_URL="${{ secrets.BACKEND_BASE_URL }}"
 
       - name: Archive iOS app
         run: |
