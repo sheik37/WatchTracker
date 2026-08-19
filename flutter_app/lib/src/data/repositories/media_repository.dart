@@ -349,11 +349,12 @@ class MediaRepository {
 
   Future<void> prefetchSeasonEpisodes(MediaDetails details) async {
     if (details.mediaType != MediaType.tv) return;
-    final seasons = details.seasons
-        .where((s) => s.seasonNumber != 0)
-        .map((s) => s.seasonNumber)
-        .toList()
-      ..sort();
+    final seasons =
+        details.seasons
+            .where((s) => s.seasonNumber != 0)
+            .map((s) => s.seasonNumber)
+            .toList()
+          ..sort();
     if (seasons.isEmpty) return;
     await Future.wait(
       seasons.map((seasonNumber) async {
@@ -436,16 +437,29 @@ class MediaRepository {
     final snapshot = await backend.getSyncSnapshot(sinceMillis: sinceMillis);
 
     final localWatchlistRows = await _database.allWatchlist();
-    final localWatchlist = localWatchlistRows.map(_watchlistItemFromLocalRow).toList();
+    final localWatchlist = localWatchlistRows
+        .map(_watchlistItemFromLocalRow)
+        .toList();
     final localTombstoneRows = await _database.allWatchlistTombstones();
-    final localTombstones = localTombstoneRows.map(_watchlistTombstoneFromLocalRow).toList();
+    final localTombstones = localTombstoneRows
+        .map(_watchlistTombstoneFromLocalRow)
+        .toList();
     final remoteWatchlist = snapshot.watchlist;
     final remoteTombstones = snapshot.watchlistTombstones;
-    final mergedTombstones = _mergeWatchlistTombstones(localTombstones, remoteTombstones);
+    final mergedTombstones = _mergeWatchlistTombstones(
+      localTombstones,
+      remoteTombstones,
+    );
 
-    final localWatchByKey = {for (final item in localWatchlist) _watchlistKey(item): item};
-    final remoteWatchByKey = {for (final item in remoteWatchlist) _watchlistKey(item): item};
-    final tombstoneByKey = {for (final item in mergedTombstones) _watchlistTombstoneKey(item): item};
+    final localWatchByKey = {
+      for (final item in localWatchlist) _watchlistKey(item): item,
+    };
+    final remoteWatchByKey = {
+      for (final item in remoteWatchlist) _watchlistKey(item): item,
+    };
+    final tombstoneByKey = {
+      for (final item in mergedTombstones) _watchlistTombstoneKey(item): item,
+    };
 
     final mergedWatchlist = <RemoteWatchlistItem>[];
     final pushWatchlist = <RemoteWatchlistItem>[];
@@ -462,7 +476,8 @@ class MediaRepository {
       final tombstone = tombstoneByKey[key];
       final localUpdated = local?.updatedAtMillis ?? 0;
       final remoteUpdated = remote?.updatedAtMillis ?? 0;
-      final deletedByTombstone = tombstone != null &&
+      final deletedByTombstone =
+          tombstone != null &&
           tombstone.deletedAtMillis >= localUpdated &&
           tombstone.deletedAtMillis >= remoteUpdated;
 
@@ -477,7 +492,8 @@ class MediaRepository {
         }
         final shouldPushDelete =
             local != null &&
-            (sinceMillis == null || (local.updatedAtMillis ?? 0) > sinceMillis) &&
+            (sinceMillis == null ||
+                (local.updatedAtMillis ?? 0) > sinceMillis) &&
             (tombstone.deletedAtMillis >= remoteUpdated);
         if (shouldPushDelete) {
           pushDeletes.add(tombstone);
@@ -552,8 +568,12 @@ class MediaRepository {
           ),
         )
         .toList();
-    final localProgressByKey = {for (final item in localProgress) _episodeKey(item): item};
-    final remoteProgressByKey = {for (final item in snapshot.episodeProgress) _episodeKey(item): item};
+    final localProgressByKey = {
+      for (final item in localProgress) _episodeKey(item): item,
+    };
+    final remoteProgressByKey = {
+      for (final item in snapshot.episodeProgress) _episodeKey(item): item,
+    };
     final episodeTombstones = {
       for (final item in snapshot.episodeProgressTombstones)
         '${item.mediaId}_${item.seasonNumber}_${item.episodeNumber}': item,
@@ -573,7 +593,8 @@ class MediaRepository {
       final tombstone = episodeTombstones[key];
       final localUpdated = local?.updatedAtMillis ?? 0;
       final remoteUpdated = remote?.updatedAtMillis ?? 0;
-      final deletedByTombstone = tombstone != null &&
+      final deletedByTombstone =
+          tombstone != null &&
           tombstone.deletedAtMillis >= localUpdated &&
           tombstone.deletedAtMillis >= remoteUpdated;
 
@@ -588,7 +609,8 @@ class MediaRepository {
         }
         final shouldPushDelete =
             local != null &&
-            (sinceMillis == null || (local.updatedAtMillis ?? 0) > sinceMillis) &&
+            (sinceMillis == null ||
+                (local.updatedAtMillis ?? 0) > sinceMillis) &&
             (tombstone.deletedAtMillis >= remoteUpdated);
         if (shouldPushDelete) {
           pushEpisodeDeletes.add(tombstone);
@@ -644,17 +666,14 @@ class MediaRepository {
 
     for (final item in pushProgress) {
       if (item.mediaId == null) continue;
-      await backend.replaceEpisodeProgress(
-        item.mediaId!,
-        [
-          RemoteEpisodeProgress(
-            mediaId: item.mediaId,
-            seasonNumber: item.seasonNumber,
-            episodeNumber: item.episodeNumber,
-            isWatched: item.isWatched,
-          ),
-        ],
-      );
+      await backend.replaceEpisodeProgress(item.mediaId!, [
+        RemoteEpisodeProgress(
+          mediaId: item.mediaId,
+          seasonNumber: item.seasonNumber,
+          episodeNumber: item.episodeNumber,
+          isWatched: item.isWatched,
+        ),
+      ]);
     }
     for (final tombstone in pushEpisodeDeletes) {
       await backend.deleteEpisodeProgress(
@@ -664,7 +683,10 @@ class MediaRepository {
       );
     }
 
-    await _database.setSyncState('last_sync_at_millis', snapshot.snapshotAtMillis);
+    await _database.setSyncState(
+      'last_sync_at_millis',
+      snapshot.snapshotAtMillis,
+    );
     _notifyWatchlistChanged();
   }
 

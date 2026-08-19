@@ -69,7 +69,7 @@ jobs:
       - name: 🧪 Run tests
         env:
           DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/watchtracker_test
-        run: cd server && pytest tests/ -v --tb=short --cov=. --cov-report=xml
+        run: cd server && python -m pytest tests/ -v --tb=short --cov=. --cov-report=xml
       
       - name: 📊 Upload coverage
         uses: codecov/codecov-action@v4

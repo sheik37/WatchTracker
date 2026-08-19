@@ -52,7 +52,7 @@ class AppUpdateResult {
 
 class AppUpdateService {
   AppUpdateService({http.Client? httpClient})
-      : _httpClient = httpClient ?? http.Client();
+    : _httpClient = httpClient ?? http.Client();
 
   final http.Client _httpClient;
 
@@ -128,7 +128,8 @@ class AppUpdateService {
       case TargetPlatform.iOS:
         return payload['ios_url'] as String?;
       default:
-        return (payload['desktop_url'] as String?) ?? (payload['url'] as String?);
+        return (payload['desktop_url'] as String?) ??
+            (payload['url'] as String?);
     }
   }
 

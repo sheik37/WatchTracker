@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -31,7 +31,8 @@ class AuthScreen extends StatefulWidget {
   final String? admin2faEmail;
   final int? resendCooldownSeconds;
   final int? forgotCooldownSeconds;
-  final Future<void> Function(String email, String password, String? otpCode) onLogin;
+  final Future<void> Function(String email, String password, String? otpCode)
+  onLogin;
   final Future<void> Function(String email, String password) onRegister;
   final Future<void> Function(String email) onForgotPassword;
   final Future<void> Function(String email) onResendVerification;
@@ -338,8 +339,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: OutlinedButton(
                     onPressed: _canResend
                         ? () => widget.onResendVerification(
-                              _emailCtrl.text.trim(),
-                            )
+                            _emailCtrl.text.trim(),
+                          )
                         : null,
                     child: Text(
                       resendCooldown > 0

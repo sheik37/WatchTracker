@@ -189,9 +189,7 @@ class BackendApiClient {
     final json = await _requestMap(
       'GET',
       '/sync/snapshot',
-      query: <String, String>{
-        if (sinceMillis != null) 'since': '$sinceMillis',
-      },
+      query: <String, String>{if (sinceMillis != null) 'since': '$sinceMillis'},
     );
     return RemoteSyncSnapshot.fromJson(json);
   }
@@ -265,20 +263,23 @@ class BackendApiClient {
     final raw = response.body.isEmpty ? '{}' : response.body;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final retryAfter = int.tryParse(response.headers['retry-after'] ?? '');
-      final attemptsRemaining =
-          int.tryParse(response.headers['x-auth-attempts-remaining'] ?? '');
+      final attemptsRemaining = int.tryParse(
+        response.headers['x-auth-attempts-remaining'] ?? '',
+      );
       String? detail;
       try {
         final decoded = jsonDecode(raw);
         if (decoded is Map) detail = decoded['detail'] as String?;
       } catch (_) {}
       final friendly = _toFriendlyMessage(detail);
-      final requiresOtp = detail == 'Two-factor code required' ||
+      final requiresOtp =
+          detail == 'Two-factor code required' ||
           detail == 'Invalid two-factor code';
       switch (response.statusCode) {
         case 400:
           throw AuthException(
-            friendly ?? 'Le mot de passe ne respecte pas les règles de sécurité.',
+            friendly ??
+                'Le mot de passe ne respecte pas les règles de sécurité.',
           );
         case 401:
           throw AuthException(
@@ -316,8 +317,7 @@ class BackendApiClient {
     const map = <String, String>{
       'Password must contain at least 10 characters':
           'Le mot de passe doit contenir au moins 10 caractères.',
-      'Password must include lower, upper, digit, and symbol':
-          'Le mot de passe doit inclure une minuscule, une majuscule, un chiffre et un symbole.',
+      'Password must include lower, upper, digit, and symbol': 'Le mot de passe doit inclure une minuscule, une majuscule, un chiffre et un symbole.',
       'Password was already used recently':
           'Ce mot de passe a déjà été utilisé récemment.',
       'New password must be different from current password':

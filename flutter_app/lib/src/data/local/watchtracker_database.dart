@@ -354,7 +354,8 @@ class WatchTrackerDatabase {
     final db = await database;
     await db.transaction((txn) async {
       for (final update in updates) {
-        final updatedAt = (update['updated_at'] as int?) ??
+        final updatedAt =
+            (update['updated_at'] as int?) ??
             DateTime.now().millisecondsSinceEpoch;
         await txn.insert('episode_progress', <String, Object?>{
           'media_id': mediaId,

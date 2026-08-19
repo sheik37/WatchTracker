@@ -63,39 +63,38 @@ class _MainShellScreenState extends State<MainShellScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: _index == 3,
       body: IndexedStack(index: _index, children: pages),
-      bottomNavigationBar:
-          _hideNavigationBar
-              ? null
-              : NavigationBar(
-                selectedIndex: _index,
-                onDestinationSelected: (value) {
-                  setState(() {
-                    _index = value;
-                  });
-                },
-                destinations: const <NavigationDestination>[
-                  NavigationDestination(
-                    icon: Icon(Icons.video_library_outlined),
-                    label: 'Series',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.movie_outlined),
-                    label: 'Films',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.live_tv_outlined),
-                    label: 'Anime',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.search),
-                    label: 'Recherche',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.person_outline),
-                    label: 'Profil',
-                  ),
-                ],
-              ),
+      bottomNavigationBar: _hideNavigationBar
+          ? null
+          : NavigationBar(
+              selectedIndex: _index,
+              onDestinationSelected: (value) {
+                setState(() {
+                  _index = value;
+                });
+              },
+              destinations: const <NavigationDestination>[
+                NavigationDestination(
+                  icon: Icon(Icons.video_library_outlined),
+                  label: 'Series',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.movie_outlined),
+                  label: 'Films',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.live_tv_outlined),
+                  label: 'Anime',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search),
+                  label: 'Recherche',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline),
+                  label: 'Profil',
+                ),
+              ],
+            ),
     );
   }
 }

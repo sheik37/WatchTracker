@@ -114,7 +114,8 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _loadMoreDiscovery() async {
-    if (_loadingDiscoveryMore || _visibleDiscoveryCount >= _discoveryPool.length) {
+    if (_loadingDiscoveryMore ||
+        _visibleDiscoveryCount >= _discoveryPool.length) {
       return;
     }
     setState(() {
@@ -180,10 +181,8 @@ class _SearchScreenState extends State<SearchScreen> {
       }
     });
     try {
-      final existingCategories = await widget.repository.getTrackedCategoriesForMedia(
-        media.id,
-        media.mediaType,
-      );
+      final existingCategories = await widget.repository
+          .getTrackedCategoriesForMedia(media.id, media.mediaType);
       if (existingCategories.isNotEmpty) {
         for (final category in existingCategories) {
           await widget.repository.removeFromWatchlist(media, category);
@@ -325,8 +324,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   crossAxisSpacing: 8,
                   childAspectRatio: 0.7,
                 ),
-                itemCount: _visibleDiscoveryCount +
-                    (_loadingDiscoveryMore ? 1 : 0),
+                itemCount:
+                    _visibleDiscoveryCount + (_loadingDiscoveryMore ? 1 : 0),
                 itemBuilder: (context, i) {
                   if (_loadingDiscoveryMore && i == _visibleDiscoveryCount) {
                     return Center(

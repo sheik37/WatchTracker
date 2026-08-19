@@ -1,4 +1,4 @@
-﻿#!/bin/sh
+#!/bin/sh
 set -eu
 
 ROOT_DIR="/volume1/homes/sheik37.v/docker"

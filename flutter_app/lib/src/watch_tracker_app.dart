@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -77,13 +77,18 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       _attemptsRemaining = null;
     });
     _retryTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         _retryAfterSeconds = (_retryAfterSeconds - 1).clamp(0, 9999);
       });
       if (_retryAfterSeconds <= 0) {
         t.cancel();
-        setState(() { _attemptsRemaining = null; });
+        setState(() {
+          _attemptsRemaining = null;
+        });
       }
     });
   }
@@ -92,7 +97,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
     _resendTimer?.cancel();
     setState(() => _resendCooldown = _kResendCooldown);
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() => _resendCooldown = (_resendCooldown - 1).clamp(0, 9999));
       if (_resendCooldown <= 0) t.cancel();
     });
@@ -102,7 +110,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
     _forgotTimer?.cancel();
     setState(() => _forgotCooldown = seconds);
     _forgotTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() => _forgotCooldown = (_forgotCooldown - 1).clamp(0, 9999));
       if (_forgotCooldown <= 0) t.cancel();
     });
@@ -220,7 +231,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       await _repository.register(email, password);
       if (mounted) {
         setState(() {
-          _authInfo = 'Inscription réussie. Vérifie ton email pour activer ton compte.';
+          _authInfo =
+              'Inscription réussie. Vérifie ton email pour activer ton compte.';
           _showResendVerification = true;
         });
         _startResendCooldown();
@@ -352,13 +364,19 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                     isLoading: _authLoading,
                     errorMessage: _authError,
                     infoMessage: _authInfo,
-                    retryAfterSeconds: _retryAfterSeconds > 0 ? _retryAfterSeconds : null,
+                    retryAfterSeconds: _retryAfterSeconds > 0
+                        ? _retryAfterSeconds
+                        : null,
                     attemptsRemaining: _attemptsRemaining,
                     showResendVerification: _showResendVerification,
                     showOtpCodeField: _showOtpField,
                     admin2faEmail: _kAdminEmail,
-                    resendCooldownSeconds: _resendCooldown > 0 ? _resendCooldown : null,
-                    forgotCooldownSeconds: _forgotCooldown > 0 ? _forgotCooldown : null,
+                    resendCooldownSeconds: _resendCooldown > 0
+                        ? _resendCooldown
+                        : null,
+                    forgotCooldownSeconds: _forgotCooldown > 0
+                        ? _forgotCooldown
+                        : null,
                     onLogin: _login,
                     onRegister: _register,
                     onForgotPassword: _forgotPassword,

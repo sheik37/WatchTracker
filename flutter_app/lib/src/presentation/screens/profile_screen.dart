@@ -82,10 +82,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _effectiveDisplayName;
   }
 
-  String get _accountEmail =>
-      widget.profile?.email.trim().isNotEmpty == true
-          ? widget.profile!.email.trim()
-          : 'Non disponible';
+  String get _accountEmail => widget.profile?.email.trim().isNotEmpty == true
+      ? widget.profile!.email.trim()
+      : 'Non disponible';
 
   String get _pendingDisplayName {
     final value = _displayNameCtrl.text.trim();
@@ -106,8 +105,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (currentProfileName != previousProfileName) {
       final nextSavedName =
           (currentProfileName != null && currentProfileName.isNotEmpty)
-              ? currentProfileName
-              : _userIdAsDefaultName;
+          ? currentProfileName
+          : _userIdAsDefaultName;
       _lastSavedDisplayName = nextSavedName;
     }
     if (!_hasPendingDisplayNameChanges &&
@@ -248,46 +247,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
     var draftValue = _pendingDisplayName;
     final result = await showDialog<String>(
       context: context,
-      builder:
-          (dialogContext) => AlertDialog(
-            scrollable: true,
-            title: const Text('Modifier le nom d\'utilisateur'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: TextFormField(
-                initialValue: draftValue,
-                autofocus: true,
-                textInputAction: TextInputAction.done,
-                onChanged: (value) => draftValue = value,
-                onFieldSubmitted: (value) {
-                  FocusScope.of(dialogContext).unfocus();
-                  Navigator.of(dialogContext).pop(value.trim());
-                },
-                decoration: const InputDecoration(
-                  labelText: 'Nom d\'utilisateur',
-                  border: OutlineInputBorder(),
-                ),
-              ),
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: const Text('Modifier le nom d\'utilisateur'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: TextFormField(
+            initialValue: draftValue,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onChanged: (value) => draftValue = value,
+            onFieldSubmitted: (value) {
+              FocusScope.of(dialogContext).unfocus();
+              Navigator.of(dialogContext).pop(value.trim());
+            },
+            decoration: const InputDecoration(
+              labelText: 'Nom d\'utilisateur',
+              border: OutlineInputBorder(),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Annuler'),
-              ),
-              TextButton(
-                onPressed: () {
-                  FocusScope.of(dialogContext).unfocus();
-                  Navigator.of(dialogContext).pop(draftValue.trim());
-                },
-                child: const Text('Enregistrer'),
-              ),
-            ],
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () {
+              FocusScope.of(dialogContext).unfocus();
+              Navigator.of(dialogContext).pop(draftValue.trim());
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
-      _displayNameCtrl.text =
-          result.isEmpty ? _userIdAsDefaultName : result;
+      _displayNameCtrl.text = result.isEmpty ? _userIdAsDefaultName : result;
       _displayNameInfo = null;
       _displayNameError = null;
     });
@@ -303,8 +300,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final normalized = _displayNameCtrl.text.trim();
       final valueToSave =
           normalized.isEmpty || normalized == _userIdAsDefaultName
-              ? null
-              : normalized;
+          ? null
+          : normalized;
       final updated = await widget.repository.updateCurrentUserDisplayName(
         valueToSave,
       );
@@ -386,16 +383,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title =
-        _subScreenVisible
-            ? _showDeleteAccount
-                ? ''
-                : _showAbout
-                ? 'À propos'
-                : _showChangePassword
-                ? 'Modifier le mot de passe'
-                : 'Paramètres'
-            : 'Profil';
+    final title = _subScreenVisible
+        ? _showDeleteAccount
+              ? ''
+              : _showAbout
+              ? 'À propos'
+              : _showChangePassword
+              ? 'Modifier le mot de passe'
+              : 'Paramètres'
+        : 'Profil';
 
     return PopScope(
       canPop: !_subScreenVisible,
@@ -409,57 +405,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
         appBar: AppBar(
           title: Text(title),
           centerTitle: _subScreenVisible,
-          leading:
-              _subScreenVisible
-                  ? IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    onPressed: _back,
-                  )
-                  : null,
+          leading: _subScreenVisible
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: _back,
+                )
+              : null,
           automaticallyImplyLeading: false,
-          actions:
-              _subScreenVisible
-                  ? null
-                  : [
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert_rounded),
-                      onSelected: (value) {
-                        if (value == 'settings') {
-                          setState(() {
-                            _settingsTab = 0;
-                            _showSettings = true;
-                          });
-                          _notifySubScreenVisibility();
-                        } else if (value == 'about') {
-                          setState(() => _showAbout = true);
-                          _notifySubScreenVisibility();
-                        }
-                      },
-                      itemBuilder:
-                          (_) => const [
-                            PopupMenuItem(
-                              value: 'settings',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.settings_rounded),
-                                  SizedBox(width: 12),
-                                  Text('Paramètres'),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'about',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.info_rounded),
-                                  SizedBox(width: 12),
-                                  Text('À propos'),
-                                ],
-                              ),
-                            ),
+          actions: _subScreenVisible
+              ? null
+              : [
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert_rounded),
+                    onSelected: (value) {
+                      if (value == 'settings') {
+                        setState(() {
+                          _settingsTab = 0;
+                          _showSettings = true;
+                        });
+                        _notifySubScreenVisibility();
+                      } else if (value == 'about') {
+                        setState(() => _showAbout = true);
+                        _notifySubScreenVisibility();
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'settings',
+                        child: Row(
+                          children: [
+                            Icon(Icons.settings_rounded),
+                            SizedBox(width: 12),
+                            Text('Paramètres'),
                           ],
-                    ),
-                  ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'about',
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_rounded),
+                            SizedBox(width: 12),
+                            Text('À propos'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
         ),
         body: MediaQuery.removeViewInsets(
           context: context,
@@ -536,10 +529,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _ProfileMainBody(
       displayName: _effectiveDisplayName,
       email: _accountEmail,
-      backendUrl:
-          AppConfig.backendBaseUrl.trim().isEmpty
-              ? 'Non configurée'
-              : AppConfig.backendBaseUrl,
+      backendUrl: AppConfig.backendBaseUrl.trim().isEmpty
+          ? 'Non configurée'
+          : AppConfig.backendBaseUrl,
     );
   }
 }
@@ -627,221 +619,218 @@ class _SettingsBody extends StatelessWidget {
         children: [
           TabBar(
             onTap: onTabChange,
-            tabs: const [Tab(text: 'Compte'), Tab(text: 'Application')],
+            tabs: const [
+              Tab(text: 'Compte'),
+              Tab(text: 'Application'),
+            ],
           ),
           Expanded(
-            child:
-                tabIndex == 0
-                    ? LayoutBuilder(
-                      builder: (context, constraints) {
-                        return Stack(
-                          children: [
-                            Positioned.fill(
-                              child: SingleChildScrollView(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  16,
-                                  16,
-                                  112,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    Card(
-                                      elevation: 1,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          Padding(
+            child: tabIndex == 0
+                ? LayoutBuilder(
+                    builder: (context, constraints) {
+                      return Stack(
+                        children: [
+                          Positioned.fill(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                16,
+                                112,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Card(
+                                    elevation: 1,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 12,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  'Identification',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleMedium
+                                                      ?.copyWith(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary,
+                                                      ),
+                                                ),
+                                              ),
+                                              TextButton(
+                                                onPressed:
+                                                    hasPendingDisplayNameChanges &&
+                                                        !saving
+                                                    ? onSaveDisplayName
+                                                    : null,
+                                                child: Text(
+                                                  saving
+                                                      ? 'Sauvegarde...'
+                                                      : 'Sauvegarder',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const Divider(height: 1),
+                                        InkWell(
+                                          onTap: onEditDisplayName,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 10,
+                                            ),
+                                            child: _AccountField(
+                                              label: 'Nom d\'utilisateur',
+                                              value: displayName,
+                                            ),
+                                          ),
+                                        ),
+                                        const Divider(height: 1),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 10,
+                                          ),
+                                          child: _AccountField(
+                                            label: 'Adresse e-mail',
+                                            value: email,
+                                          ),
+                                        ),
+                                        const Divider(height: 1),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 10,
+                                          ),
+                                          child: _AccountField(
+                                            label: 'Identifiant utilisateur',
+                                            value: userId,
+                                          ),
+                                        ),
+                                        const Divider(height: 1),
+                                        InkWell(
+                                          onTap: onChangePasswordTap,
+                                          child: Padding(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 16,
                                               vertical: 12,
                                             ),
                                             child: Row(
                                               children: [
-                                                Expanded(
+                                                const Expanded(
                                                   child: Text(
-                                                    'Identification',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .titleMedium
-                                                        ?.copyWith(
-                                                          color:
-                                                              Theme.of(context)
-                                                                  .colorScheme
-                                                                  .primary,
-                                                        ),
+                                                    'Modifier le mot de passe',
                                                   ),
                                                 ),
-                                                TextButton(
-                                                  onPressed:
-                                                      hasPendingDisplayNameChanges &&
-                                                              !saving
-                                                          ? onSaveDisplayName
-                                                          : null,
-                                                  child: Text(
-                                                    saving
-                                                        ? 'Sauvegarde...'
-                                                        : 'Sauvegarder',
-                                                  ),
+                                                Text(
+                                                  '>',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleMedium,
                                                 ),
                                               ],
                                             ),
                                           ),
-                                          const Divider(height: 1),
-                                          InkWell(
-                                            onTap: onEditDisplayName,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 10,
-                                                  ),
-                                              child: _AccountField(
-                                                label: 'Nom d\'utilisateur',
-                                                value: displayName,
-                                              ),
-                                            ),
-                                          ),
-                                          const Divider(height: 1),
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                            child: _AccountField(
-                                              label: 'Adresse e-mail',
-                                              value: email,
-                                            ),
-                                          ),
-                                          const Divider(height: 1),
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                            child: _AccountField(
-                                              label: 'Identifiant utilisateur',
-                                              value: userId,
-                                            ),
-                                          ),
-                                          const Divider(height: 1),
-                                          InkWell(
-                                            onTap: onChangePasswordTap,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 12,
-                                                  ),
-                                              child: Row(
-                                                children: [
-                                                  const Expanded(
-                                                    child: Text(
-                                                      'Modifier le mot de passe',
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    '>',
-                                                    style:
-                                                        Theme.of(
-                                                          context,
-                                                        ).textTheme.titleMedium,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (info != null) ...[
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      info!,
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
                                       ),
                                     ),
-                                    if (info != null) ...[
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        info!,
-                                        style: TextStyle(
-                                          color:
-                                              Theme.of(
-                                                context,
-                                              ).colorScheme.primary,
-                                        ),
-                                      ),
-                                    ],
-                                    if (error != null) ...[
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        error!,
-                                        style: TextStyle(
-                                          color:
-                                              Theme.of(context).colorScheme.error,
-                                        ),
-                                      ),
-                                    ],
                                   ],
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              left: 16,
-                              right: 16,
-                              bottom: 8,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  FilledButton(
-                                    onPressed: onLogout,
-                                    child: const Text('Se déconnecter'),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Center(
-                                    child: InkWell(
-                                      onTap: onDeleteAccountTap,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 8,
-                                        ),
-                                        child: Text(
-                                          'Supprimer le compte',
-                                          style: TextStyle(
-                                            color:
-                                                Theme.of(
-                                                  context,
-                                                ).colorScheme.error,
-                                          ),
-                                        ),
+                                  if (error != null) ...[
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      error!,
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .error,
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),
-                          ],
-                        );
-                      },
-                    )
-                    : ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: const [
-                        Card(
-                          elevation: 1,
-                          child: Padding(
-                            padding: EdgeInsets.all(16),
+                          ),
+                          Positioned(
+                            left: 16,
+                            right: 16,
+                            bottom: 8,
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text('Application'),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Configuration de l\'application bientôt disponible.',
+                                FilledButton(
+                                  onPressed: onLogout,
+                                  child: const Text('Se déconnecter'),
+                                ),
+                                const SizedBox(height: 8),
+                                Center(
+                                  child: InkWell(
+                                    onTap: onDeleteAccountTap,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: Text(
+                                        'Supprimer le compte',
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .error,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
                           ),
+                        ],
+                      );
+                    },
+                  )
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: const [
+                      Card(
+                        elevation: 1,
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Application'),
+                              SizedBox(height: 8),
+                              Text(
+                                'Configuration de l\'application bientôt disponible.',
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -1009,12 +998,11 @@ class _AboutBody extends StatelessWidget {
             'assets/images/watchtracker_logo.png',
             width: 120,
             height: 120,
-            errorBuilder:
-                (_, _, _) => const Icon(
-                  Icons.movie_filter_rounded,
-                  size: 120,
-                  color: Color(0xFF006A6A),
-                ),
+            errorBuilder: (_, _, _) => const Icon(
+              Icons.movie_filter_rounded,
+              size: 120,
+              color: Color(0xFF006A6A),
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -1025,10 +1013,7 @@ class _AboutBody extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Version',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('Version', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(version),
                 const Divider(height: 24),
@@ -1055,7 +1040,9 @@ class _AboutBody extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     appUpdateError!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -1086,7 +1073,9 @@ class _AboutBody extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     'Tu as déjà la dernière version.',
-                    style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
                 ],
               ],
@@ -1117,22 +1106,20 @@ class _PasswordCriteriaChecklist extends StatelessWidget {
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children:
-            checks.map((entry) {
-              final (label, isValid) = entry;
-              return Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  '${isValid ? "• ✓ " : "• ✗ "}$label',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color:
-                        isValid
-                            ? const Color(0xFF2E7D32)
-                            : Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              );
-            }).toList(),
+        children: checks.map((entry) {
+          final (label, isValid) = entry;
+          return Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '${isValid ? "• ✓ " : "• ✗ "}$label',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: isValid
+                    ? const Color(0xFF2E7D32)
+                    : Theme.of(context).colorScheme.error,
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -1151,9 +1138,8 @@ class _AccountField extends StatelessWidget {
       children: [
         Text(
           label,
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+          style: Theme.of(context).textTheme.labelMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 2),
         Text(value, style: Theme.of(context).textTheme.bodyLarge),
