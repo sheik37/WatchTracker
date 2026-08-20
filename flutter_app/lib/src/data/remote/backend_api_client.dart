@@ -258,7 +258,16 @@ class BackendApiClient {
       final streamed = await _client.send(request);
       response = await http.Response.fromStream(streamed);
     } on SocketException {
+      if (uri.scheme.toLowerCase() == 'http') {
+        throw const AuthException(
+          'Impossible de contacter l\'API. BACKEND_BASE_URL utilise HTTP; utilise HTTPS pour la version Android release.',
+        );
+      }
       throw const AuthException('Impossible de contacter l\'API.');
+    } on HandshakeException {
+      throw const AuthException(
+        'Connexion API sécurisée impossible (certificat TLS invalide).',
+      );
     }
     final raw = response.body.isEmpty ? '{}' : response.body;
     if (response.statusCode < 200 || response.statusCode >= 300) {

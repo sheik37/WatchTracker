@@ -7,6 +7,15 @@ Utilisez ce template pour configurer les secrets dans **Settings → Secrets and
 
 ## 🔷 Secrets optionnels (pour releases & notifications)
 
+### 📱 Mobile release (04-release.yml)
+```
+BACKEND_BASE_URL = https://api.watchtracker.net
+TMDB_API_KEY = your_tmdb_api_key
+TVDB_API_KEY = your_tvdb_api_key
+```
+
+`BACKEND_BASE_URL` doit être en **HTTPS** pour les APK Android release.
+
 ### 📦 Docker Registry (pour 04-release.yml)
 ```
 DOCKER_USERNAME = your_docker_username

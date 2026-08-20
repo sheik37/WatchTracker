@@ -53,6 +53,22 @@ jobs:
       - name: Get dependencies
         run: cd flutter_app && flutter pub get
 
+      - name: Validate release API base URL
+        env:
+          BACKEND_BASE_URL: ${{ secrets.BACKEND_BASE_URL }}
+        run: |
+          if [ -z "$BACKEND_BASE_URL" ]; then
+            echo "::error::Secret BACKEND_BASE_URL manquant. La release mobile serait inutilisable."
+            exit 1
+          fi
+          case "$BACKEND_BASE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::BACKEND_BASE_URL doit commencer par https:// pour Android release."
+              exit 1
+              ;;
+          esac
+
       - name: Build APK
         run: |
           cd flutter_app

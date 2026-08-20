@@ -42,7 +42,14 @@
   - 🍎 Build iOS sans signature + upload en artefact/release
   - 🐳 Build Docker image
 
-**Secrets requis** (optionnel pour Docker):
+**Secrets requis**:
+```
+BACKEND_BASE_URL (obligatoire, HTTPS)
+TMDB_API_KEY
+TVDB_API_KEY
+```
+
+**Secrets Docker** (optionnel):
 ```
 DOCKER_USERNAME
 DOCKER_PASSWORD
