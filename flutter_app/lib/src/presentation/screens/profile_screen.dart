@@ -6,6 +6,15 @@ import '../../core/app_update_service.dart';
 import '../../data/models/auth_models.dart';
 import '../../data/repositories/media_repository.dart';
 
+String? _extractFirstHttpUrl(String text) {
+  final match = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(text);
+  final candidate = match?.group(0);
+  if (candidate == null || candidate.isEmpty) return null;
+  final uri = Uri.tryParse(candidate);
+  if (uri == null || !uri.hasScheme || !uri.hasAuthority) return null;
+  return uri.toString();
+}
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
@@ -151,10 +160,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
       return;
     }
+    await _openExternalUrl(
+      url: url,
+      invalidUrlError: 'Lien de mise à jour invalide.',
+      openError: 'Impossible de lancer le téléchargement de la mise à jour.',
+      mode: 'download',
+    );
+  }
+
+  Future<void> _openReleaseNotes() async {
+    final notes = _appUpdateResult?.releaseNotes?.trim();
+    final url = notes == null ? null : _extractFirstHttpUrl(notes);
+    if (url == null) {
+      setState(() {
+        _appUpdateError = 'Lien de note de version invalide.';
+      });
+      return;
+    }
+    await _openExternalUrl(
+      url: url,
+      invalidUrlError: 'Lien de note de version invalide.',
+      openError: 'Impossible d\'ouvrir automatiquement la note de version.',
+    );
+  }
+
+  Future<void> _openExternalUrl({
+    required String url,
+    required String invalidUrlError,
+    required String openError,
+    String mode = 'view',
+  }) async {
     final uri = Uri.tryParse(url);
     if (uri == null) {
       setState(() {
-        _appUpdateError = 'Lien de mise à jour invalide.';
+        _appUpdateError = invalidUrlError;
       });
       return;
     }
@@ -163,6 +202,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       opened =
           await _systemChannel.invokeMethod<bool>('openUrl', <String, dynamic>{
             'url': uri.toString(),
+            'mode': mode,
           }) ??
           false;
     } on PlatformException {
@@ -170,8 +210,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     if (!opened && mounted) {
       setState(() {
-        _appUpdateError =
-            'Impossible d\'ouvrir automatiquement le lien de mise à jour.';
+        _appUpdateError = openError;
       });
     }
   }
@@ -490,6 +529,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         appUpdateResult: _appUpdateResult,
         onCheckForUpdates: _checkForUpdates,
         onOpenUpdateDownload: _openUpdateDownload,
+        onOpenReleaseNotes: _openReleaseNotes,
       );
     }
     if (_showSettings) {
@@ -978,6 +1018,7 @@ class _AboutBody extends StatelessWidget {
     required this.appUpdateResult,
     required this.onCheckForUpdates,
     required this.onOpenUpdateDownload,
+    required this.onOpenReleaseNotes,
   });
 
   final String version;
@@ -986,9 +1027,15 @@ class _AboutBody extends StatelessWidget {
   final AppUpdateResult? appUpdateResult;
   final Future<void> Function() onCheckForUpdates;
   final Future<void> Function() onOpenUpdateDownload;
+  final Future<void> Function() onOpenReleaseNotes;
 
   @override
   Widget build(BuildContext context) {
+    final releaseNotes = appUpdateResult?.releaseNotes?.trim();
+    final releaseNotesUrl = releaseNotes == null || releaseNotes.isEmpty
+        ? null
+        : _extractFirstHttpUrl(releaseNotes);
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       children: [
@@ -1031,10 +1078,22 @@ class _AboutBody extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text('Dernière version : ${appUpdateResult!.latestLabel}'),
                 ],
-                if (appUpdateResult?.releaseNotes != null &&
-                    appUpdateResult!.releaseNotes!.isNotEmpty) ...[
+                if (releaseNotes != null && releaseNotes.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(appUpdateResult!.releaseNotes!),
+                  if (releaseNotesUrl != null)
+                    TextButton(
+                      onPressed: () {
+                        onOpenReleaseNotes();
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Voir la note'),
+                    )
+                  else
+                    Text(releaseNotes),
                 ],
                 if (appUpdateError != null) ...[
                   const SizedBox(height: 8),
