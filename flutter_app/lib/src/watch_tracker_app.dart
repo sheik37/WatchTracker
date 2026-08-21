@@ -1,8 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
+import 'core/app_update_launcher.dart';
+import 'core/app_update_service.dart';
 import 'presentation/theme/app_theme.dart';
 import 'data/local/auth_session_store.dart';
 import 'data/local/watchtracker_database.dart';
@@ -27,6 +27,11 @@ class WatchTrackerApp extends StatefulWidget {
 class _WatchTrackerAppState extends State<WatchTrackerApp> {
   late final AuthSessionStore _sessionStore;
   late final MediaRepository _repository;
+  final AppUpdateService _appUpdateService = AppUpdateService();
+  final AppUpdateLauncher _appUpdateLauncher = AppUpdateLauncher();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   bool _bootLoading = true;
   bool _authLoading = false;
@@ -38,14 +43,12 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   bool _showOtpField = false;
   bool _showResendVerification = false;
 
-  int _retryAfterSeconds = 0;
+  int? _retryUntilMillis;
   int? _attemptsRemaining;
-  int _resendCooldown = 0;
-  int _forgotCooldown = 0;
-
-  Timer? _retryTimer;
-  Timer? _resendTimer;
-  Timer? _forgotTimer;
+  int? _resendUntilMillis;
+  int? _forgotUntilMillis;
+  bool _startupUpdateCheckStarted = false;
+  bool _startupUpdatePromptShown = false;
 
   @override
   void initState() {
@@ -64,59 +67,32 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
 
   @override
   void dispose() {
-    _retryTimer?.cancel();
-    _resendTimer?.cancel();
-    _forgotTimer?.cancel();
+    _appUpdateService.dispose();
     super.dispose();
   }
 
   void _startRetryCountdown(int seconds) {
-    _retryTimer?.cancel();
     setState(() {
-      _retryAfterSeconds = seconds;
+      _retryUntilMillis = _deadlineAfter(seconds);
       _attemptsRemaining = null;
-    });
-    _retryTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() {
-        _retryAfterSeconds = (_retryAfterSeconds - 1).clamp(0, 9999);
-      });
-      if (_retryAfterSeconds <= 0) {
-        t.cancel();
-        setState(() {
-          _attemptsRemaining = null;
-        });
-      }
-    });
-  }
-
-  void _startResendCooldown() {
-    _resendTimer?.cancel();
-    setState(() => _resendCooldown = _kResendCooldown);
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() => _resendCooldown = (_resendCooldown - 1).clamp(0, 9999));
-      if (_resendCooldown <= 0) t.cancel();
     });
   }
 
   void _startForgotCooldown([int seconds = _kForgotCooldown]) {
-    _forgotTimer?.cancel();
-    setState(() => _forgotCooldown = seconds);
-    _forgotTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() => _forgotCooldown = (_forgotCooldown - 1).clamp(0, 9999));
-      if (_forgotCooldown <= 0) t.cancel();
-    });
+    setState(() => _forgotUntilMillis = _deadlineAfter(seconds));
+  }
+
+  int? _deadlineAfter(int seconds) {
+    if (seconds <= 0) return null;
+    return DateTime.now().millisecondsSinceEpoch +
+        const Duration(seconds: 1).inMilliseconds * seconds;
+  }
+
+  int _remainingSeconds(int? untilMillis) {
+    if (untilMillis == null) return 0;
+    final remainingMillis = untilMillis - DateTime.now().millisecondsSinceEpoch;
+    if (remainingMillis <= 0) return 0;
+    return (remainingMillis / 1000).ceil();
   }
 
   Future<void> _bootstrap() async {
@@ -163,7 +139,112 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
         } catch (_) {}
       }
     }
-    if (mounted) setState(() => _bootLoading = false);
+    if (mounted) {
+      setState(() => _bootLoading = false);
+      _checkForStartupUpdateIfNeeded();
+    }
+  }
+
+  void _checkForStartupUpdateIfNeeded() {
+    if (_startupUpdateCheckStarted) return;
+    _startupUpdateCheckStarted = true;
+    _checkForStartupUpdate();
+  }
+
+  Future<void> _checkForStartupUpdate() async {
+    try {
+      final result = await _appUpdateService.checkForUpdates();
+      if (!mounted || !result.isUpdateAvailable || _startupUpdatePromptShown) {
+        return;
+      }
+      _startupUpdatePromptShown = true;
+      await _presentStartupUpdateDialog(result);
+    } catch (_) {
+      // Ignore startup update failures to avoid blocking app launch.
+    }
+  }
+
+  Future<void> _presentStartupUpdateDialog(AppUpdateResult result) async {
+    if (!mounted) return;
+    if (_navigatorKey.currentContext != null) {
+      await _showStartupUpdateDialog(result);
+      return;
+    }
+
+    WidgetsBinding.instance.scheduleFrame();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _presentStartupUpdateDialog(result);
+    });
+  }
+
+  Future<void> _showStartupUpdateDialog(AppUpdateResult result) async {
+    final dialogContext = _navigatorKey.currentContext;
+    if (dialogContext == null) return;
+    final releaseNotes = result.releaseNotes?.trim();
+    final hasReleaseNotes =
+        releaseNotes != null &&
+        AppUpdateLauncher.extractFirstHttpUrl(releaseNotes) != null;
+
+    await showDialog<void>(
+      context: dialogContext,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Mise à jour disponible'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Une nouvelle version de WatchTracker est disponible.'),
+            const SizedBox(height: 12),
+            Text('Version installée : ${result.currentLabel}'),
+            Text('Nouvelle version : ${result.latestLabel}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Plus tard'),
+          ),
+          if (hasReleaseNotes)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _openStartupReleaseNotes(result);
+              },
+              child: const Text('Voir la note'),
+            ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              await _openStartupUpdateDownload(result);
+            },
+            child: const Text('Télécharger'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openStartupUpdateDownload(AppUpdateResult result) async {
+    try {
+      await _appUpdateLauncher.openDownload(result.downloadUrl);
+    } on AppUpdateLaunchException catch (e) {
+      _showStartupUpdateError(e.message);
+    }
+  }
+
+  Future<void> _openStartupReleaseNotes(AppUpdateResult result) async {
+    try {
+      await _appUpdateLauncher.openReleaseNotes(result.releaseNotes);
+    } on AppUpdateLaunchException catch (e) {
+      _showStartupUpdateError(e.message);
+    }
+  }
+
+  void _showStartupUpdateError(String message) {
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _login(String email, String password, String? otpCode) async {
@@ -195,8 +276,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
         setState(() {
           _showOtpField = false;
           _showResendVerification = false;
-          _retryAfterSeconds = 0;
+          _retryUntilMillis = null;
           _attemptsRemaining = null;
+          _resendUntilMillis = null;
+          _forgotUntilMillis = null;
         });
       }
     } on AuthException catch (e) {
@@ -234,8 +317,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _authInfo =
               'Inscription réussie. Vérifie ton email pour activer ton compte.';
           _showResendVerification = true;
+          _resendUntilMillis = _deadlineAfter(_kResendCooldown);
         });
-        _startResendCooldown();
       }
     } on AuthException catch (e) {
       if (mounted) {
@@ -261,7 +344,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       setState(() => _authError = 'Saisis une adresse email valide.');
       return;
     }
-    if (_forgotCooldown > 0) return;
+    if (_remainingSeconds(_forgotUntilMillis) > 0) return;
     setState(() {
       _authLoading = true;
       _authError = null;
@@ -270,8 +353,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
     try {
       final msg = await _repository.forgotPassword(email);
       if (mounted) {
-        setState(() => _authInfo = msg);
-        _startForgotCooldown();
+        setState(() {
+          _authInfo = msg;
+          _forgotUntilMillis = _deadlineAfter(_kForgotCooldown);
+        });
       }
     } on AuthException catch (e) {
       if (mounted) {
@@ -292,7 +377,9 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       setState(() => _authError = 'Saisis une adresse email valide.');
       return;
     }
-    if (!_showResendVerification || _resendCooldown > 0) return;
+    if (!_showResendVerification || _remainingSeconds(_resendUntilMillis) > 0) {
+      return;
+    }
     setState(() {
       _authLoading = true;
       _authError = null;
@@ -301,8 +388,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
     try {
       final msg = await _repository.resendVerification(email);
       if (mounted) {
-        setState(() => _authInfo = msg);
-        _startResendCooldown();
+        setState(() {
+          _authInfo = msg;
+          _resendUntilMillis = _deadlineAfter(_kResendCooldown);
+        });
       }
     } on AuthException catch (e) {
       if (mounted) setState(() => _authError = e.message);
@@ -332,6 +421,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _showResendVerification = false;
           _authError = null;
           _authInfo = null;
+          _retryUntilMillis = null;
+          _attemptsRemaining = null;
+          _resendUntilMillis = null;
+          _forgotUntilMillis = null;
         });
       }
     }
@@ -353,6 +446,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'WatchTracker',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
@@ -366,19 +461,13 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                         '${AppConfig.appVersion}+${AppConfig.appBuildNumber}',
                     errorMessage: _authError,
                     infoMessage: _authInfo,
-                    retryAfterSeconds: _retryAfterSeconds > 0
-                        ? _retryAfterSeconds
-                        : null,
+                    retryUntilMillis: _retryUntilMillis,
                     attemptsRemaining: _attemptsRemaining,
                     showResendVerification: _showResendVerification,
                     showOtpCodeField: _showOtpField,
                     admin2faEmail: _kAdminEmail,
-                    resendCooldownSeconds: _resendCooldown > 0
-                        ? _resendCooldown
-                        : null,
-                    forgotCooldownSeconds: _forgotCooldown > 0
-                        ? _forgotCooldown
-                        : null,
+                    resendUntilMillis: _resendUntilMillis,
+                    forgotUntilMillis: _forgotUntilMillis,
                     onLogin: _login,
                     onRegister: _register,
                     onForgotPassword: _forgotPassword,
@@ -387,6 +476,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                       _authError = null;
                       _authInfo = null;
                       _attemptsRemaining = null;
+                      _retryUntilMillis = null;
                     }),
                   )
                 : MainShellScreen(

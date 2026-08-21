@@ -79,12 +79,12 @@ jobs:
           if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
             mkdir -p flutter_app/android/keystore
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > flutter_app/android/keystore/watchtracker-release.keystore
-            cat > flutter_app/android/key.properties <<EOF
-storeFile=../android/keystore/watchtracker-release.keystore
-storePassword=$ANDROID_KEYSTORE_PASSWORD
-keyAlias=$ANDROID_KEY_ALIAS
-keyPassword=$ANDROID_KEY_PASSWORD
-EOF
+            {
+              echo "storeFile=../android/keystore/watchtracker-release.keystore"
+              echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+              echo "keyAlias=$ANDROID_KEY_ALIAS"
+              echo "keyPassword=$ANDROID_KEY_PASSWORD"
+            } > flutter_app/android/key.properties
           else
             echo "::warning::Android signing secrets missing; release APK will fall back to debug key. This will prevent future upgrades if the app was previously signed with a different certificate."
           fi

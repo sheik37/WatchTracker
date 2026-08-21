@@ -1,19 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/app_config.dart';
+import '../../core/app_update_launcher.dart';
 import '../../core/app_update_service.dart';
 import '../../data/models/auth_models.dart';
 import '../../data/repositories/media_repository.dart';
-
-String? _extractFirstHttpUrl(String text) {
-  final match = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(text);
-  final candidate = match?.group(0);
-  if (candidate == null || candidate.isEmpty) return null;
-  final uri = Uri.tryParse(candidate);
-  if (uri == null || !uri.hasScheme || !uri.hasAuthority) return null;
-  return uri.toString();
-}
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -36,9 +27,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const MethodChannel _systemChannel = MethodChannel(
-    'watchtracker/system',
-  );
   bool _showSettings = false;
   bool _showChangePassword = false;
   bool _showDeleteAccount = false;
@@ -64,6 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _deleteError;
 
   final AppUpdateService _appUpdateService = AppUpdateService();
+  final AppUpdateLauncher _appUpdateLauncher = AppUpdateLauncher();
   bool _checkingForUpdates = false;
   String? _appUpdateError;
   AppUpdateResult? _appUpdateResult;
@@ -152,66 +141,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _openUpdateDownload() async {
-    final url = _appUpdateResult?.downloadUrl?.trim();
-    if (url == null || url.isEmpty) {
-      setState(() {
-        _appUpdateError =
-            'Aucun lien de téléchargement configuré pour cette plateforme.';
-      });
-      return;
+    try {
+      await _appUpdateLauncher.openDownload(_appUpdateResult?.downloadUrl);
+    } on AppUpdateLaunchException catch (e) {
+      if (!mounted) return;
+      setState(() => _appUpdateError = e.message);
     }
-    await _openExternalUrl(
-      url: url,
-      invalidUrlError: 'Lien de mise à jour invalide.',
-      openError: 'Impossible de lancer le téléchargement de la mise à jour.',
-      mode: 'download',
-    );
   }
 
   Future<void> _openReleaseNotes() async {
-    final notes = _appUpdateResult?.releaseNotes?.trim();
-    final url = notes == null ? null : _extractFirstHttpUrl(notes);
-    if (url == null) {
-      setState(() {
-        _appUpdateError = 'Lien de note de version invalide.';
-      });
-      return;
-    }
-    await _openExternalUrl(
-      url: url,
-      invalidUrlError: 'Lien de note de version invalide.',
-      openError: 'Impossible d\'ouvrir automatiquement la note de version.',
-    );
-  }
-
-  Future<void> _openExternalUrl({
-    required String url,
-    required String invalidUrlError,
-    required String openError,
-    String mode = 'view',
-  }) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      setState(() {
-        _appUpdateError = invalidUrlError;
-      });
-      return;
-    }
-    var opened = false;
     try {
-      opened =
-          await _systemChannel.invokeMethod<bool>('openUrl', <String, dynamic>{
-            'url': uri.toString(),
-            'mode': mode,
-          }) ??
-          false;
-    } on PlatformException {
-      opened = false;
-    }
-    if (!opened && mounted) {
-      setState(() {
-        _appUpdateError = openError;
-      });
+      await _appUpdateLauncher.openReleaseNotes(_appUpdateResult?.releaseNotes);
+    } on AppUpdateLaunchException catch (e) {
+      if (!mounted) return;
+      setState(() => _appUpdateError = e.message);
     }
   }
 
@@ -877,7 +820,7 @@ class _SettingsBody extends StatelessWidget {
   }
 }
 
-class _ChangePasswordBody extends StatelessWidget {
+class _ChangePasswordBody extends StatefulWidget {
   const _ChangePasswordBody({
     required this.currentController,
     required this.newController,
@@ -897,54 +840,99 @@ class _ChangePasswordBody extends StatelessWidget {
   final VoidCallback onSubmit;
 
   @override
+  State<_ChangePasswordBody> createState() => _ChangePasswordBodyState();
+}
+
+class _ChangePasswordBodyState extends State<_ChangePasswordBody> {
+  bool _showCurrentPassword = false;
+  bool _showNewPassword = false;
+  bool _showConfirmPassword = false;
+
+  @override
   Widget build(BuildContext context) {
     final canSubmit =
-        currentController.text.isNotEmpty &&
-        newController.text.isNotEmpty &&
-        confirmController.text.isNotEmpty &&
-        !loading;
+        widget.currentController.text.isNotEmpty &&
+        widget.newController.text.isNotEmpty &&
+        widget.confirmController.text.isNotEmpty &&
+        !widget.loading;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         TextField(
-          controller: currentController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.currentController,
+          obscureText: !_showCurrentPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Mot de passe actuel',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  setState(() => _showCurrentPassword = !_showCurrentPassword),
+              icon: Icon(
+                _showCurrentPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showCurrentPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
         const SizedBox(height: 12),
         TextField(
-          controller: newController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.newController,
+          obscureText: !_showNewPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Nouveau mot de passe',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  setState(() => _showNewPassword = !_showNewPassword),
+              icon: Icon(
+                _showNewPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showNewPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
-        _PasswordCriteriaChecklist(password: newController.text),
+        _PasswordCriteriaChecklist(password: widget.newController.text),
         const SizedBox(height: 12),
         TextField(
-          controller: confirmController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.confirmController,
+          obscureText: !_showConfirmPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Confirmer le mot de passe',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  setState(() => _showConfirmPassword = !_showConfirmPassword),
+              icon: Icon(
+                _showConfirmPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showConfirmPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
-        _PasswordCriteriaChecklist(password: confirmController.text),
-        if (error != null) ...[
+        _PasswordCriteriaChecklist(password: widget.confirmController.text),
+        if (widget.error != null) ...[
           const SizedBox(height: 8),
           Text(
-            error!,
+            widget.error!,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ],
@@ -952,9 +940,9 @@ class _ChangePasswordBody extends StatelessWidget {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: canSubmit ? onSubmit : null,
+            onPressed: canSubmit ? widget.onSubmit : null,
             child: Text(
-              loading ? 'Modification...' : 'Modifier le mot de passe',
+              widget.loading ? 'Modification...' : 'Modifier le mot de passe',
             ),
           ),
         ),
@@ -1033,7 +1021,7 @@ class _AboutBody extends StatelessWidget {
     final releaseNotes = appUpdateResult?.releaseNotes?.trim();
     final releaseNotesUrl = releaseNotes == null || releaseNotes.isEmpty
         ? null
-        : _extractFirstHttpUrl(releaseNotes);
+        : AppUpdateLauncher.extractFirstHttpUrl(releaseNotes);
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),

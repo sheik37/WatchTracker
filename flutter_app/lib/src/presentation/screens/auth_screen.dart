@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -12,13 +14,13 @@ class AuthScreen extends StatefulWidget {
     required this.onResendVerification,
     this.errorMessage,
     this.infoMessage,
-    this.retryAfterSeconds,
+    this.retryUntilMillis,
     this.attemptsRemaining,
     this.showResendVerification = false,
     this.showOtpCodeField = false,
     this.admin2faEmail,
-    this.resendCooldownSeconds,
-    this.forgotCooldownSeconds,
+    this.resendUntilMillis,
+    this.forgotUntilMillis,
     this.onModeChanged,
   });
 
@@ -26,13 +28,13 @@ class AuthScreen extends StatefulWidget {
   final String appVersionLabel;
   final String? errorMessage;
   final String? infoMessage;
-  final int? retryAfterSeconds;
+  final int? retryUntilMillis;
   final int? attemptsRemaining;
   final bool showResendVerification;
   final bool showOtpCodeField;
   final String? admin2faEmail;
-  final int? resendCooldownSeconds;
-  final int? forgotCooldownSeconds;
+  final int? resendUntilMillis;
+  final int? forgotUntilMillis;
   final Future<void> Function(String email, String password, String? otpCode)
   onLogin;
   final Future<void> Function(String email, String password) onRegister;
@@ -49,21 +51,16 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
   bool _isRegisterMode = false;
+  bool _showPassword = false;
+  Timer? _countdownTicker;
+  _PasswordValidation _passwordValidation = const _PasswordValidation();
 
-  bool get _hasMinLength => _passwordCtrl.text.length >= 10;
-  bool get _hasLower => _passwordCtrl.text
-      .split('')
-      .any((c) => c.toLowerCase() != c.toUpperCase() && c == c.toLowerCase());
-  bool get _hasUpper => _passwordCtrl.text
-      .split('')
-      .any((c) => c.toLowerCase() != c.toUpperCase() && c == c.toUpperCase());
-  bool get _hasDigit =>
-      _passwordCtrl.text.split('').any((c) => '0123456789'.contains(c));
-  bool get _hasSymbol => _passwordCtrl.text
-      .split('')
-      .any((c) => !RegExp(r'[A-Za-z0-9]').hasMatch(c));
-  bool get _passwordValid =>
-      _hasMinLength && _hasLower && _hasUpper && _hasDigit && _hasSymbol;
+  bool get _hasMinLength => _passwordValidation.hasMinLength;
+  bool get _hasLower => _passwordValidation.hasLower;
+  bool get _hasUpper => _passwordValidation.hasUpper;
+  bool get _hasDigit => _passwordValidation.hasDigit;
+  bool get _hasSymbol => _passwordValidation.hasSymbol;
+  bool get _passwordValid => _passwordValidation.isValid;
 
   bool get _isAdminTarget =>
       widget.admin2faEmail != null &&
@@ -73,7 +70,11 @@ class _AuthScreenState extends State<AuthScreen> {
   bool get _shouldShowOtp =>
       !_isRegisterMode && (widget.showOtpCodeField || _isAdminTarget);
 
-  bool get _isRateLimited => (widget.retryAfterSeconds ?? 0) > 0;
+  int get _retryAfterSeconds => _remainingSeconds(widget.retryUntilMillis);
+  int get _resendCooldown => _remainingSeconds(widget.resendUntilMillis);
+  int get _forgotCooldown => _remainingSeconds(widget.forgotUntilMillis);
+
+  bool get _isRateLimited => _retryAfterSeconds > 0;
 
   bool get _canSubmit {
     if (widget.isLoading || _isRateLimited) return false;
@@ -89,21 +90,75 @@ class _AuthScreenState extends State<AuthScreen> {
       _emailCtrl.text.contains('@') &&
       !widget.isLoading &&
       !_isRateLimited &&
-      (widget.resendCooldownSeconds ?? 0) <= 0;
+      _resendCooldown <= 0;
 
   bool get _canForgot =>
       !_isRegisterMode &&
       _emailCtrl.text.contains('@') &&
       !widget.isLoading &&
       !_isRateLimited &&
-      (widget.forgotCooldownSeconds ?? 0) <= 0;
+      _forgotCooldown <= 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshCountdownTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant AuthScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.retryUntilMillis != widget.retryUntilMillis ||
+        oldWidget.resendUntilMillis != widget.resendUntilMillis ||
+        oldWidget.forgotUntilMillis != widget.forgotUntilMillis) {
+      _refreshCountdownTicker();
+    }
+  }
 
   @override
   void dispose() {
+    _countdownTicker?.cancel();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _otpCtrl.dispose();
     super.dispose();
+  }
+
+  void _refreshCountdownTicker() {
+    _countdownTicker?.cancel();
+    if (!_hasActiveCountdown) return;
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (!_hasActiveCountdown) {
+        timer.cancel();
+      }
+      setState(() {});
+    });
+  }
+
+  bool get _hasActiveCountdown =>
+      _isFutureDeadline(widget.retryUntilMillis) ||
+      _isFutureDeadline(widget.resendUntilMillis) ||
+      _isFutureDeadline(widget.forgotUntilMillis);
+
+  bool _isFutureDeadline(int? untilMillis) =>
+      untilMillis != null &&
+      untilMillis > DateTime.now().millisecondsSinceEpoch;
+
+  int _remainingSeconds(int? untilMillis) {
+    if (untilMillis == null) return 0;
+    final remainingMillis = untilMillis - DateTime.now().millisecondsSinceEpoch;
+    if (remainingMillis <= 0) return 0;
+    return (remainingMillis / 1000).ceil();
+  }
+
+  void _handlePasswordChanged(String value) {
+    setState(() {
+      _passwordValidation = _PasswordValidation.evaluate(value);
+    });
   }
 
   Future<void> _submit() async {
@@ -126,9 +181,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final resendCooldown = widget.resendCooldownSeconds ?? 0;
-    final forgotCooldown = widget.forgotCooldownSeconds ?? 0;
-
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: SafeArea(
@@ -225,9 +277,21 @@ class _AuthScreenState extends State<AuthScreen> {
                       label: _isRegisterMode
                           ? 'Mot de passe (10+, min/maj/chiffre/symbole)'
                           : 'Mot de passe',
-                      obscureText: true,
+                      obscureText: !_showPassword,
                       enabled: !widget.isLoading,
-                      onChanged: (_) => setState(() {}),
+                      onChanged: _handlePasswordChanged,
+                      suffixIcon: IconButton(
+                        onPressed: () =>
+                            setState(() => _showPassword = !_showPassword),
+                        icon: Icon(
+                          _showPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                        tooltip: _showPassword
+                            ? 'Masquer le mot de passe'
+                            : 'Afficher le mot de passe',
+                      ),
                     ),
                     if (_shouldShowOtp) ...[
                       const SizedBox(height: 12),
@@ -289,7 +353,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          'Trop de tentatives. Réessaie dans ${widget.retryAfterSeconds}s.',
+                          'Trop de tentatives. Réessaie dans ${_retryAfterSeconds}s.',
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.error,
                           ),
@@ -339,8 +403,8 @@ class _AuthScreenState extends State<AuthScreen> {
                                 )
                               : null,
                           child: Text(
-                            forgotCooldown > 0
-                                ? 'Mot de passe oublié (${forgotCooldown}s)'
+                            _forgotCooldown > 0
+                                ? 'Mot de passe oublié (${_forgotCooldown}s)'
                                 : 'Mot de passe oublié',
                           ),
                         ),
@@ -357,8 +421,8 @@ class _AuthScreenState extends State<AuthScreen> {
                                 )
                               : null,
                           child: Text(
-                            resendCooldown > 0
-                                ? 'Renvoyer l\'email (${resendCooldown}s)'
+                            _resendCooldown > 0
+                                ? 'Renvoyer l\'email (${_resendCooldown}s)'
                                 : 'Renvoyer l\'email de vérification',
                           ),
                         ),
@@ -386,6 +450,55 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
+class _PasswordValidation {
+  const _PasswordValidation({
+    this.hasMinLength = false,
+    this.hasLower = false,
+    this.hasUpper = false,
+    this.hasDigit = false,
+    this.hasSymbol = false,
+  });
+
+  final bool hasMinLength;
+  final bool hasLower;
+  final bool hasUpper;
+  final bool hasDigit;
+  final bool hasSymbol;
+
+  bool get isValid =>
+      hasMinLength && hasLower && hasUpper && hasDigit && hasSymbol;
+
+  static _PasswordValidation evaluate(String password) {
+    var hasLower = false;
+    var hasUpper = false;
+    var hasDigit = false;
+    var hasSymbol = false;
+
+    for (final rune in password.runes) {
+      final isUpper = rune >= 65 && rune <= 90;
+      final isLower = rune >= 97 && rune <= 122;
+      final isDigit = rune >= 48 && rune <= 57;
+      if (isUpper) {
+        hasUpper = true;
+      } else if (isLower) {
+        hasLower = true;
+      } else if (isDigit) {
+        hasDigit = true;
+      } else {
+        hasSymbol = true;
+      }
+    }
+
+    return _PasswordValidation(
+      hasMinLength: password.length >= 10,
+      hasLower: hasLower,
+      hasUpper: hasUpper,
+      hasDigit: hasDigit,
+      hasSymbol: hasSymbol,
+    );
+  }
+}
+
 class _OutlinedTextField extends StatelessWidget {
   const _OutlinedTextField({
     required this.controller,
@@ -395,6 +508,7 @@ class _OutlinedTextField extends StatelessWidget {
     this.inputFormatters,
     this.enabled = true,
     this.onChanged,
+    this.suffixIcon,
   });
 
   final TextEditingController controller;
@@ -404,6 +518,7 @@ class _OutlinedTextField extends StatelessWidget {
   final List<TextInputFormatter>? inputFormatters;
   final bool enabled;
   final ValueChanged<String>? onChanged;
+  final Widget? suffixIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +532,7 @@ class _OutlinedTextField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
+        suffixIcon: suffixIcon,
       ),
     );
   }
