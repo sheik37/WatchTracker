@@ -50,7 +50,43 @@ jobs:
       
       - name: 🧪 Run tests
         run: cd flutter_app && flutter test --coverage
-      
+
+      - name: 📈 Coverage summary
+        if: always()
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          lcov_path = Path("flutter_app/coverage/lcov.info")
+          if not lcov_path.exists():
+              raise SystemExit("coverage/lcov.info introuvable")
+
+          found = 0
+          hit = 0
+          for line in lcov_path.read_text(encoding="utf-8").splitlines():
+              if line.startswith("LF:"):
+                  found += int(line.split(":", 1)[1])
+              elif line.startswith("LH:"):
+                  hit += int(line.split(":", 1)[1])
+
+          percent = 0.0 if found == 0 else (hit / found) * 100
+          summary = (
+              "## Flutter coverage\n"
+              f"- Lignes couvertes: {hit}/{found}\n"
+              f"- Couverture: {percent:.2f}%\n"
+          )
+          print(summary)
+          github_step_summary = Path("${GITHUB_STEP_SUMMARY}")
+          github_step_summary.write_text(summary, encoding="utf-8")
+          PY
+
+      - name: 📦 Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-coverage
+          path: flutter_app/coverage/lcov.info
+       
       - name: 📊 Upload coverage
         uses: codecov/codecov-action@v4
         with:
