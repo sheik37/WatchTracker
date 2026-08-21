@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/app_config.dart';
@@ -382,19 +381,17 @@ class _AuthScreenState extends State<AuthScreen> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  if (kDebugMode) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'API: ${AppConfig.backendBaseUrl.isEmpty ? "EMPTY" : AppConfig.backendBaseUrl}',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppConfig.backendBaseUrl.isEmpty
-                            ? Colors.red
-                            : Colors.green,
-                        fontSize: 10,
-                      ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'API: ${AppConfig.backendBaseUrl.isEmpty ? "EMPTY" : AppConfig.backendBaseUrl}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppConfig.backendBaseUrl.isEmpty
+                          ? Colors.red
+                          : Colors.green,
+                      fontSize: 9,
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
