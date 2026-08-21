@@ -1,6 +1,4 @@
-class AppConfig {
-  const AppConfig._();
-
+abstract class AppConfig {
   static const tmdbApiKey = String.fromEnvironment(
     'TMDB_API_KEY',
     defaultValue: '',

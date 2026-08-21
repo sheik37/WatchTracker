@@ -6,31 +6,39 @@ void main() {
   Widget buildScreen({
     bool isLoading = false,
     int? retryUntilMillis,
+    int? attemptsRemaining,
     int? resendUntilMillis,
     int? forgotUntilMillis,
     bool showResendVerification = false,
     bool showOtpCodeField = false,
     String? admin2faEmail,
+    String? errorMessage,
+    String? infoMessage,
     Future<void> Function(String email, String password, String? otpCode)?
     onLogin,
     Future<void> Function(String email, String password)? onRegister,
     Future<void> Function(String email)? onForgotPassword,
     Future<void> Function(String email)? onResendVerification,
+    VoidCallback? onModeChanged,
   }) {
     return MaterialApp(
       home: AuthScreen(
         appVersionLabel: '2.0.8+42',
         isLoading: isLoading,
         retryUntilMillis: retryUntilMillis,
+        attemptsRemaining: attemptsRemaining,
         resendUntilMillis: resendUntilMillis,
         forgotUntilMillis: forgotUntilMillis,
         showResendVerification: showResendVerification,
         showOtpCodeField: showOtpCodeField,
         admin2faEmail: admin2faEmail,
+        errorMessage: errorMessage,
+        infoMessage: infoMessage,
         onLogin: onLogin ?? (_, _, _) async {},
         onRegister: onRegister ?? (_, _) async {},
         onForgotPassword: onForgotPassword ?? (_) async {},
         onResendVerification: onResendVerification ?? (_) async {},
+        onModeChanged: onModeChanged,
       ),
     );
   }
@@ -109,6 +117,66 @@ void main() {
     expect(find.textContaining('Réessaie dans '), findsOneWidget);
     expect(find.textContaining('Mot de passe oublié ('), findsOneWidget);
     expect(find.text('Version 2.0.8+42'), findsOneWidget);
+  });
+
+  testWidgets('shows resend cooldown text in register mode', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    await tester.pumpWidget(
+      buildScreen(showResendVerification: true, resendUntilMillis: now + 5000),
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Inscription'));
+    await tester.pump();
+
+    expect(find.textContaining('Renvoyer l\'email ('), findsOneWidget);
+  });
+
+  testWidgets('renders image fallback, error and info messages', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildScreen(errorMessage: 'Erreur visible', infoMessage: 'Info visible'),
+    );
+    await tester.pump();
+
+    expect(find.text('Erreur visible'), findsOneWidget);
+    expect(find.text('Info visible'), findsOneWidget);
+  });
+
+  testWidgets('submits registration and displays attempts remaining', (
+    tester,
+  ) async {
+    String? registeredEmail;
+    String? registeredPassword;
+
+    await tester.pumpWidget(
+      buildScreen(
+        showResendVerification: true,
+        onRegister: (email, password) async {
+          registeredEmail = email;
+          registeredPassword = password;
+        },
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Inscription'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).at(0), 'user@example.com');
+    await tester.enterText(find.byType(TextField).at(1), 'Abcd1234!x');
+    await tester.pump();
+
+    final registerButton = find.widgetWithText(FilledButton, 'Créer un compte');
+    await tester.ensureVisible(registerButton);
+    await tester.tap(registerButton);
+    await tester.pump();
+
+    expect(registeredEmail, 'user@example.com');
+    expect(registeredPassword, 'Abcd1234!x');
+
+    await tester.pumpWidget(buildScreen(attemptsRemaining: 2));
+    await tester.pump();
+
+    expect(find.text('Tentatives restantes avant blocage : 2'), findsOneWidget);
   });
 
   testWidgets('calls login with otp code when admin submits the form', (
@@ -227,4 +295,22 @@ void main() {
 
     expect(modeChanges, 2);
   });
+
+  testWidgets('updates countdowns when widget properties change', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    await tester.pumpWidget(buildScreen(retryUntilMillis: now + 2500));
+    await tester.pump();
+    expect(find.textContaining('Réessaie dans '), findsOneWidget);
+
+    await tester.pumpWidget(
+      buildScreen(retryUntilMillis: now + 4500, resendUntilMillis: now + 4500),
+    );
+    await tester.pump();
+    expect(find.textContaining('Réessaie dans '), findsOneWidget);
+    expect(find.textContaining('Renvoyer l\'email ('), findsNothing);
+  });
+
 }

@@ -115,4 +115,10 @@ void main() {
       ),
     );
   });
+
+  test('launcher exception stringifies to its message', () {
+    const exception = AppUpdateLaunchException('Erreur');
+
+    expect(exception.toString(), 'Erreur');
+  });
 }

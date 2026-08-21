@@ -44,6 +44,32 @@ void main() {
       expect(<int>[].firstOrNull, isNull);
       expect([1, 2, 3].firstOrNull, 1);
     });
+
+    test('creates watchlist items with stored values', () {
+      const media = Media(
+        id: 1,
+        title: 'Movie',
+        posterPath: null,
+        backdropPath: null,
+        overview: 'Overview',
+        releaseDate: '2024-01-01',
+        voteAverage: 7.5,
+        mediaType: MediaType.movie,
+      );
+      const item = WatchlistItem(
+        media: media,
+        status: WatchStatus.watched,
+        watchedEpisodes: 0,
+        totalEpisodes: 0,
+        lastWatchedAt: 123,
+      );
+
+      expect(item.media.title, 'Movie');
+      expect(item.status, WatchStatus.watched);
+      expect(item.watchedEpisodes, 0);
+      expect(item.totalEpisodes, 0);
+      expect(item.lastWatchedAt, 123);
+    });
   });
 
   group('details models', () {

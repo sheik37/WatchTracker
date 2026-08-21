@@ -158,6 +158,15 @@ void main() {
       },
     );
 
+    test('builds with the default HTTP client', () {
+      final client = BackendApiClient(
+        baseUrl: 'https://api.watchtracker.net',
+        authToken: null,
+      );
+
+      expect(client, isA<BackendApiClient>());
+    });
+
     test('updateMe sends a PATCH with display name payload', () async {
       late String method;
       late Uri uri;
@@ -471,6 +480,30 @@ void main() {
       );
     });
 
+    test(
+      'maps SocketException on HTTPS base URL to reachability guidance',
+      () async {
+        final client = BackendApiClient(
+          baseUrl: 'https://api.watchtracker.net',
+          authToken: null,
+          client: _ThrowingClient(const SocketException('failed host lookup')),
+        );
+
+        await expectLater(
+          client.login('user@example.com', 'Secret123!'),
+          throwsA(
+            isA<AuthException>().having(
+              (e) => e.message,
+              'message',
+              contains(
+                'Impossible de contacter l\'API (api.watchtracker.net:443). Vérifie que le serveur est accessible.',
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
     test('maps 403 to unverified email message', () async {
       final client = BackendApiClient(
         baseUrl: 'https://api.watchtracker.net',
@@ -616,6 +649,31 @@ void main() {
         ),
       );
     });
+
+    test(
+      'returns fallback success messages when backend omits message field',
+      () async {
+        final client = BackendApiClient(
+          baseUrl: 'https://api.watchtracker.net',
+          authToken: null,
+          client: MockClient((_) async => http.Response('{}', 200)),
+        );
+
+        expect(
+          await client.register('user@example.com', 'Secret123!'),
+          'Inscription réussie',
+        );
+        expect(
+          await client.resendVerification('user@example.com'),
+          'Email envoyé',
+        );
+        expect(await client.forgotPassword('user@example.com'), 'Email envoyé');
+        expect(
+          await client.changePassword('old', 'new'),
+          'Mot de passe modifié',
+        );
+      },
+    );
   });
 }
 

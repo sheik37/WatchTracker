@@ -51,19 +51,46 @@ class AppUpdateResult {
 }
 
 class AppUpdateService {
-  AppUpdateService({http.Client? httpClient})
-    : _httpClient = httpClient ?? http.Client();
+  AppUpdateService({
+    http.Client? httpClient,
+    this.currentVersion,
+    this.currentBuildNumber,
+    this.manifestUrl,
+    this.androidUpdateUrl,
+    this.iosUpdateUrl,
+    this.updateDownloadUrl,
+    this.targetPlatform,
+  }) : _httpClient = httpClient ?? http.Client();
 
   final http.Client _httpClient;
+  final String? currentVersion;
+  final int? currentBuildNumber;
+  final String? manifestUrl;
+  final String? androidUpdateUrl;
+  final String? iosUpdateUrl;
+  final String? updateDownloadUrl;
+  final TargetPlatform? targetPlatform;
+
+  String get _resolvedCurrentVersion => currentVersion ?? AppConfig.appVersion;
+  int get _resolvedCurrentBuildNumber =>
+      currentBuildNumber ?? AppConfig.appBuildNumber;
+  String get _resolvedManifestUrl => manifestUrl ?? AppConfig.updateManifestUrl;
+  String get _resolvedAndroidUpdateUrl =>
+      androidUpdateUrl ?? AppConfig.androidUpdateUrl;
+  String get _resolvedIosUpdateUrl => iosUpdateUrl ?? AppConfig.iosUpdateUrl;
+  String get _resolvedUpdateDownloadUrl =>
+      updateDownloadUrl ?? AppConfig.updateDownloadUrl;
+  TargetPlatform get _resolvedTargetPlatform =>
+      targetPlatform ?? defaultTargetPlatform;
 
   void dispose() {
     _httpClient.close();
   }
 
   Future<AppUpdateResult> checkForUpdates() async {
-    final currentVersion = AppConfig.appVersion.trim();
-    final currentBuild = AppConfig.appBuildNumber;
-    final manifestUrl = AppConfig.updateManifestUrl.trim();
+    final currentVersion = _resolvedCurrentVersion.trim();
+    final currentBuild = _resolvedCurrentBuildNumber;
+    final manifestUrl = _resolvedManifestUrl.trim();
 
     if (manifestUrl.isEmpty) {
       return AppUpdateResult(
@@ -122,7 +149,7 @@ class AppUpdateService {
   }
 
   String? _platformDownloadUrl(Map<String, dynamic> payload) {
-    switch (defaultTargetPlatform) {
+    switch (_resolvedTargetPlatform) {
       case TargetPlatform.android:
         return payload['android_url'] as String?;
       case TargetPlatform.iOS:
@@ -134,19 +161,19 @@ class AppUpdateService {
   }
 
   String? _fallbackDownloadUrl() {
-    switch (defaultTargetPlatform) {
+    switch (_resolvedTargetPlatform) {
       case TargetPlatform.android:
-        final androidUrl = AppConfig.androidUpdateUrl.trim();
+        final androidUrl = _resolvedAndroidUpdateUrl.trim();
         if (androidUrl.isNotEmpty) return androidUrl;
         break;
       case TargetPlatform.iOS:
-        final iosUrl = AppConfig.iosUpdateUrl.trim();
+        final iosUrl = _resolvedIosUpdateUrl.trim();
         if (iosUrl.isNotEmpty) return iosUrl;
         break;
       default:
         break;
     }
-    final genericUrl = AppConfig.updateDownloadUrl.trim();
+    final genericUrl = _resolvedUpdateDownloadUrl.trim();
     return genericUrl.isEmpty ? null : genericUrl;
   }
 }

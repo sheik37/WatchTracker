@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_app/src/core/app_config.dart';
 import 'package:flutter_app/src/core/app_update_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,9 +49,47 @@ void main() {
 
       expect(result.isUpdateAvailable, isFalse);
     });
+
+    test('uses plain version label when latest build number is missing', () {
+      const result = AppUpdateResult(
+        currentVersion: '2.0.0',
+        currentBuildNumber: 1,
+        latestVersion: '2.0.1',
+        latestBuildNumber: null,
+        downloadUrl: null,
+        releaseNotes: null,
+      );
+
+      expect(result.latestLabel, '2.0.1');
+    });
   });
 
   group('AppUpdateService', () {
+    test('can be created with the default HTTP client and disposed', () {
+      final service = AppUpdateService();
+
+      service.dispose();
+    });
+
+    test('returns fallback data when the manifest URL is empty', () async {
+      final service = AppUpdateService(
+        manifestUrl: '',
+        currentVersion: '2.0.0',
+        currentBuildNumber: 7,
+        androidUpdateUrl: 'https://example.com/android.apk',
+        targetPlatform: TargetPlatform.android,
+      );
+
+      final result = await service.checkForUpdates();
+
+      expect(result.currentVersion, '2.0.0');
+      expect(result.currentBuildNumber, 7);
+      expect(result.latestVersion, '2.0.0');
+      expect(result.latestBuildNumber, 7);
+      expect(result.downloadUrl, 'https://example.com/android.apk');
+      expect(result.isUpdateAvailable, isFalse);
+    });
+
     test(
       'parses the update manifest and returns the latest metadata',
       () async {
@@ -85,6 +124,61 @@ void main() {
       },
     );
 
+    test('uses iOS platform URL when the target platform is iOS', () async {
+      final service = AppUpdateService(
+        targetPlatform: TargetPlatform.iOS,
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'latest_version': '2.1.0',
+              'ios_url': 'https://example.com/ios',
+            }),
+            200,
+          ),
+        ),
+      );
+
+      final result = await service.checkForUpdates();
+
+      expect(result.downloadUrl, 'https://example.com/ios');
+    });
+
+    test('uses desktop URL then generic URL for non mobile targets', () async {
+      final desktopService = AppUpdateService(
+        targetPlatform: TargetPlatform.windows,
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'latest_version': '2.1.0',
+              'desktop_url': 'https://example.com/desktop',
+            }),
+            200,
+          ),
+        ),
+      );
+      final genericService = AppUpdateService(
+        targetPlatform: TargetPlatform.windows,
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'latest_version': '2.1.0',
+              'url': 'https://example.com/generic',
+            }),
+            200,
+          ),
+        ),
+      );
+
+      expect(
+        (await desktopService.checkForUpdates()).downloadUrl,
+        'https://example.com/desktop',
+      );
+      expect(
+        (await genericService.checkForUpdates()).downloadUrl,
+        'https://example.com/generic',
+      );
+    });
+
     test(
       'keeps a null download URL when manifest has no platform link',
       () async {
@@ -108,6 +202,53 @@ void main() {
         expect(result.isUpdateAvailable, isFalse);
       },
     );
+
+    test(
+      'uses fallback iOS and generic URLs when manifest omits platform URL',
+      () async {
+        final iosService = AppUpdateService(
+          targetPlatform: TargetPlatform.iOS,
+          iosUpdateUrl: 'https://example.com/appstore',
+          httpClient: MockClient(
+            (_) async =>
+                http.Response(jsonEncode({'latest_version': '2.1.0'}), 200),
+          ),
+        );
+        final desktopService = AppUpdateService(
+          targetPlatform: TargetPlatform.windows,
+          updateDownloadUrl: 'https://example.com/download',
+          httpClient: MockClient(
+            (_) async =>
+                http.Response(jsonEncode({'latest_version': '2.1.0'}), 200),
+          ),
+        );
+
+        expect(
+          (await iosService.checkForUpdates()).downloadUrl,
+          'https://example.com/appstore',
+        );
+        expect(
+          (await desktopService.checkForUpdates()).downloadUrl,
+          'https://example.com/download',
+        );
+      },
+    );
+
+    test('compares version strings with different lengths', () async {
+      final service = AppUpdateService(
+        currentVersion: '2.0',
+        currentBuildNumber: 1,
+        manifestUrl: 'https://example.com/version.json',
+        httpClient: MockClient(
+          (_) async =>
+              http.Response(jsonEncode({'latest_version': '2.0.1'}), 200),
+        ),
+      );
+
+      final result = await service.checkForUpdates();
+
+      expect(result.isUpdateAvailable, isTrue);
+    });
 
     test('throws when the manifest cannot be fetched', () async {
       final service = AppUpdateService(
