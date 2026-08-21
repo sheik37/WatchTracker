@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../core/app_config.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
@@ -372,27 +371,12 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: Column(
-                children: [
-                  Text(
-                    'Version ${widget.appVersionLabel}',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'API: ${AppConfig.backendBaseUrl.isEmpty ? "EMPTY" : AppConfig.backendBaseUrl}',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppConfig.backendBaseUrl.isEmpty
-                          ? Colors.red
-                          : Colors.green,
-                      fontSize: 9,
-                    ),
-                  ),
-                ],
+              child: Text(
+                'Version ${widget.appVersionLabel}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],

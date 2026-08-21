@@ -606,7 +606,6 @@ class _ProfileMainBody extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text('Nom d\'utilisateur : $displayName'),
                 Text('Adresse e-mail : $email'),
-                Text('API backend : $backendUrl'),
                 const Text('Session : connectée'),
               ],
             ),

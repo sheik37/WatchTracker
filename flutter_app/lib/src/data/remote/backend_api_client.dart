@@ -245,23 +245,7 @@ class BackendApiClient {
     Object? body,
     Map<String, String>? query,
   }) async {
-    if (baseUrl.isEmpty) {
-      throw AuthException('URL backend vide');
-    }
-    final normalized = _normalizeBase(baseUrl);
-    if (normalized.isEmpty) {
-      throw AuthException('URL backend normalisée vide');
-    }
-    try {
-      final uri = Uri.parse(normalized + path)
-          .replace(queryParameters: query);
-      if (!uri.hasAbsolutePath) {
-        throw AuthException('URI invalide: $normalized + $path');
-      }
-    } catch (e) {
-      throw AuthException('Erreur parsing URI: $e');
-    }
-    final uri = Uri.parse(normalized + path)
+    final uri = Uri.parse(_normalizeBase(baseUrl) + path)
         .replace(queryParameters: query);
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (authToken != null && authToken!.isNotEmpty) {
