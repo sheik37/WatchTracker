@@ -15,7 +15,10 @@ class AppUpdateLauncher {
   );
 
   static String? extractFirstHttpUrl(String text) {
-    final match = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(text);
+    final match = RegExp(
+      r'https?://\S+',
+      caseSensitive: false,
+    ).firstMatch(text);
     final candidate = match?.group(0);
     if (candidate == null || candidate.isEmpty) return null;
     final uri = Uri.tryParse(candidate);

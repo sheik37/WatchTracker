@@ -87,12 +87,12 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
                         setState(() => _staleExpanded = !_staleExpanded),
                   ),
                   if (_staleExpanded)
-                   sections.staleItems.isEmpty
+                    sections.staleItems.isEmpty
                         ? _emptySection()
-                       : _SectionGrid(
-                           items: sections.staleItems,
-                           onTap: _openDetails,
-                         ),
+                        : _SectionGrid(
+                            items: sections.staleItems,
+                            onTap: _openDetails,
+                          ),
                 ],
                 for (final status in statuses) ...[
                   _SectionHeader(
@@ -140,6 +140,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
     );
     _reload();
   }
+
   List<WatchStatus> _statusesForCategory(WatchCategory category) {
     return switch (category) {
       WatchCategory.films => const [
@@ -157,10 +158,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
 }
 
 class _WatchlistSections {
-  const _WatchlistSections({
-    required this.staleItems,
-    required this.byStatus,
-  });
+  const _WatchlistSections({required this.staleItems, required this.byStatus});
 
   final List<WatchlistItem> staleItems;
   final Map<WatchStatus, List<WatchlistItem>> byStatus;
@@ -174,10 +172,9 @@ class _WatchlistSections {
   ) {
     final staleItems = <WatchlistItem>[];
     final byStatus = <WatchStatus, List<WatchlistItem>>{};
-    final staleCutoffMillis =
-        DateTime.now()
-            .subtract(const Duration(days: 30))
-            .millisecondsSinceEpoch;
+    final staleCutoffMillis = DateTime.now()
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
 
     for (final item in items) {
       final watchedAt = item.lastWatchedAt;

@@ -868,9 +868,8 @@ class _ChangePasswordBodyState extends State<_ChangePasswordBody> {
             labelText: 'Mot de passe actuel',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
-              onPressed: () => setState(
-                () => _showCurrentPassword = !_showCurrentPassword,
-              ),
+              onPressed: () =>
+                  setState(() => _showCurrentPassword = !_showCurrentPassword),
               icon: Icon(
                 _showCurrentPassword
                     ? Icons.visibility_off_outlined
@@ -916,9 +915,8 @@ class _ChangePasswordBodyState extends State<_ChangePasswordBody> {
             labelText: 'Confirmer le mot de passe',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
-              onPressed: () => setState(
-                () => _showConfirmPassword = !_showConfirmPassword,
-              ),
+              onPressed: () =>
+                  setState(() => _showConfirmPassword = !_showConfirmPassword),
               icon: Icon(
                 _showConfirmPassword
                     ? Icons.visibility_off_outlined

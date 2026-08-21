@@ -145,7 +145,8 @@ class _AuthScreenState extends State<AuthScreen> {
       _isFutureDeadline(widget.forgotUntilMillis);
 
   bool _isFutureDeadline(int? untilMillis) =>
-      untilMillis != null && untilMillis > DateTime.now().millisecondsSinceEpoch;
+      untilMillis != null &&
+      untilMillis > DateTime.now().millisecondsSinceEpoch;
 
   int _remainingSeconds(int? untilMillis) {
     if (untilMillis == null) return 0;

@@ -194,9 +194,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Une nouvelle version de WatchTracker est disponible.',
-            ),
+            const Text('Une nouvelle version de WatchTracker est disponible.'),
             const SizedBox(height: 12),
             Text('Version installée : ${result.currentLabel}'),
             Text('Nouvelle version : ${result.latestLabel}'),

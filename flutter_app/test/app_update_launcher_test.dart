@@ -12,9 +12,6 @@ void main() {
   });
 
   test('returns null when release notes contain no valid URL', () {
-    expect(
-      AppUpdateLauncher.extractFirstHttpUrl('Aucune URL ici'),
-      isNull,
-    );
+    expect(AppUpdateLauncher.extractFirstHttpUrl('Aucune URL ici'), isNull);
   });
 }

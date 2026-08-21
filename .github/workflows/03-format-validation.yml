@@ -52,7 +52,7 @@ jobs:
           echo "Commits à vérifier:"
           echo "$COMMITS"
           
-          INVALID=$(echo "$COMMITS" | grep -vE "^(${FRENCH_KEYWORDS}):" | grep -v "^Merge " || true)
+          INVALID=$(echo "$COMMITS" | grep -vE "^(${FRENCH_KEYWORDS})(\\([^)]+\\))?:" | grep -v "^Merge " || true)
           
           if [ -n "$INVALID" ]; then
             echo ""
