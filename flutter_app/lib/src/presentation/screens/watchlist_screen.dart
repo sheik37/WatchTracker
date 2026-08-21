@@ -20,7 +20,7 @@ class WatchlistScreen extends StatefulWidget {
 }
 
 class _WatchlistScreenState extends State<WatchlistScreen> {
-  late Future<List<WatchlistItem>> _future;
+  late Future<_WatchlistSections> _future;
   final Map<WatchStatus, bool> _expanded = {};
   bool _staleExpanded = true;
 
@@ -47,8 +47,13 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
 
   void _reload() {
     setState(() {
-      _future = widget.repository.getWatchlist(widget.category);
+      _future = _loadSections();
     });
+  }
+
+  Future<_WatchlistSections> _loadSections() async {
+    final items = await widget.repository.getWatchlist(widget.category);
+    return _WatchlistSections.fromItems(widget.category, items);
   }
 
   @override
@@ -61,17 +66,13 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
-      body: FutureBuilder<List<WatchlistItem>>(
+      body: FutureBuilder<_WatchlistSections>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          final all = snapshot.data ?? [];
-          final staleItems = widget.category == WatchCategory.films
-              ? <WatchlistItem>[]
-              : all.where((i) => _isStale(i)).toList();
-          final regular = all.where((i) => !staleItems.contains(i)).toList();
+          final sections = snapshot.data ?? _WatchlistSections.empty();
 
           return RefreshIndicator(
             onRefresh: () async => _reload(),
@@ -86,9 +87,12 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
                         setState(() => _staleExpanded = !_staleExpanded),
                   ),
                   if (_staleExpanded)
-                    staleItems.isEmpty
+                   sections.staleItems.isEmpty
                         ? _emptySection()
-                        : _SectionGrid(items: staleItems, onTap: _openDetails),
+                       : _SectionGrid(
+                           items: sections.staleItems,
+                           onTap: _openDetails,
+                         ),
                 ],
                 for (final status in statuses) ...[
                   _SectionHeader(
@@ -99,14 +103,13 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
                     ),
                   ),
                   if (_expanded[status] ?? true)
-                    (() {
-                      final items = regular
-                          .where((i) => i.status == status)
-                          .toList();
-                      return items.isEmpty
-                          ? _emptySection()
-                          : _SectionGrid(items: items, onTap: _openDetails);
-                    })(),
+                    ((sections.byStatus[status] ?? const <WatchlistItem>[])
+                            .isEmpty)
+                        ? _emptySection()
+                        : _SectionGrid(
+                            items: sections.byStatus[status]!,
+                            onTap: _openDetails,
+                          ),
                 ],
               ],
             ),
@@ -137,24 +140,60 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
     );
     _reload();
   }
-
-  bool _isStale(WatchlistItem item) {
-    final watchedAt = item.lastWatchedAt;
-    if (watchedAt == null || item.watchedEpisodes <= 0) return false;
-    return DateTime.now().millisecondsSinceEpoch - watchedAt >
-        const Duration(days: 30).inMilliseconds;
-  }
-
   List<WatchStatus> _statusesForCategory(WatchCategory category) {
     return switch (category) {
-      WatchCategory.films => [WatchStatus.notWatched, WatchStatus.watched],
-      _ => [
+      WatchCategory.films => const [
+        WatchStatus.notWatched,
+        WatchStatus.watched,
+      ],
+      _ => const [
         WatchStatus.notStarted,
         WatchStatus.inProgress,
         WatchStatus.upToDate,
         WatchStatus.completed,
       ],
     };
+  }
+}
+
+class _WatchlistSections {
+  const _WatchlistSections({
+    required this.staleItems,
+    required this.byStatus,
+  });
+
+  final List<WatchlistItem> staleItems;
+  final Map<WatchStatus, List<WatchlistItem>> byStatus;
+
+  factory _WatchlistSections.empty() =>
+      const _WatchlistSections(staleItems: [], byStatus: {});
+
+  factory _WatchlistSections.fromItems(
+    WatchCategory category,
+    List<WatchlistItem> items,
+  ) {
+    final staleItems = <WatchlistItem>[];
+    final byStatus = <WatchStatus, List<WatchlistItem>>{};
+    final staleCutoffMillis =
+        DateTime.now()
+            .subtract(const Duration(days: 30))
+            .millisecondsSinceEpoch;
+
+    for (final item in items) {
+      final watchedAt = item.lastWatchedAt;
+      final isStale =
+          category != WatchCategory.films &&
+          watchedAt != null &&
+          item.watchedEpisodes > 0 &&
+          watchedAt < staleCutoffMillis;
+      if (isStale) {
+        staleItems.add(item);
+        continue;
+      }
+      (byStatus[item.status] ??= <WatchlistItem>[]).add(item);
+    }
+
+    return _WatchlistSections(staleItems: staleItems, byStatus: byStatus);
   }
 }
 

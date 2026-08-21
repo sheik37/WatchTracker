@@ -26,7 +26,6 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Media> _results = [];
   Set<String> _tracked = {};
   bool _loading = false;
-  bool _loadingDiscoveryMore = false;
   String? _error;
   bool _searching = false;
   Timer? _searchDebounce;
@@ -76,11 +75,15 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _loading = true;
       _error = null;
-      _loadingDiscoveryMore = false;
     });
     try {
-      final discovery = await widget.repository.getDiscoveryMedia();
-      final tracked = await widget.repository.getTrackedMediaKeys();
+      final values = await Future.wait<Object>([
+        widget.repository.getDiscoveryMedia(),
+        widget.repository.getTrackedMediaKeys(),
+      ]);
+      final discovery = values[0] as List<Media>;
+      final tracked = values[1] as Set<String>;
+      if (!mounted) return;
       setState(() {
         _discoveryPool = discovery;
         _visibleDiscoveryCount = discovery.isEmpty
@@ -89,22 +92,19 @@ class _SearchScreenState extends State<SearchScreen> {
             ? discovery.length
             : _discoveryBatchSize;
         _tracked = tracked;
+        _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
+        _loading = false;
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
     }
   }
 
   void _maybeLoadMoreDiscovery() {
-    if (_searching || _loading || _loadingDiscoveryMore) return;
+    if (_searching || _loading) return;
     if (_visibleDiscoveryCount >= _discoveryPool.length) return;
     if (!_discoveryScrollCtrl.hasClients) return;
     if (_discoveryScrollCtrl.position.extentAfter > _discoveryLoadThreshold) {
@@ -113,23 +113,16 @@ class _SearchScreenState extends State<SearchScreen> {
     _loadMoreDiscovery();
   }
 
-  Future<void> _loadMoreDiscovery() async {
-    if (_loadingDiscoveryMore ||
-        _visibleDiscoveryCount >= _discoveryPool.length) {
+  void _loadMoreDiscovery() {
+    if (_visibleDiscoveryCount >= _discoveryPool.length) {
       return;
     }
-    setState(() {
-      _loadingDiscoveryMore = true;
-    });
-    await Future<void>.delayed(Duration.zero);
-    if (!mounted) return;
     final nextCount = (_visibleDiscoveryCount + _discoveryBatchSize).clamp(
       0,
       _discoveryPool.length,
     );
     setState(() {
       _visibleDiscoveryCount = nextCount;
-      _loadingDiscoveryMore = false;
     });
   }
 
@@ -149,29 +142,29 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     try {
-      final results = await widget.repository.searchMedia(trimmed);
-      final tracked = await widget.repository.getTrackedMediaKeys();
+      final values = await Future.wait<Object>([
+        widget.repository.searchMedia(trimmed),
+        widget.repository.getTrackedMediaKeys(),
+      ]);
+      final results = values[0] as List<Media>;
+      final tracked = values[1] as Set<String>;
       if (!mounted || requestId != _searchRequestId) return;
       setState(() {
         _results = results;
         _tracked = tracked;
+        _loading = false;
       });
     } catch (e) {
       if (!mounted || requestId != _searchRequestId) return;
       setState(() {
         _error = e.toString();
+        _loading = false;
       });
-    } finally {
-      if (mounted && requestId == _searchRequestId) {
-        setState(() {
-          _loading = false;
-        });
-      }
     }
   }
 
   Future<void> _toggleFollow(Media media) async {
-    final key = '${media.mediaType.value}_${media.id}';
+    final key = _mediaKey(media);
     final wasTracked = _tracked.contains(key);
     setState(() {
       if (wasTracked) {
@@ -218,6 +211,8 @@ class _SearchScreenState extends State<SearchScreen> {
       });
     }
   }
+
+  String _mediaKey(Media media) => '${media.mediaType.value}_${media.id}';
 
   Future<(WatchCategory, int)> _buildAddPreset(Media media) async {
     if (media.mediaType == MediaType.movie) {
@@ -301,9 +296,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, i) {
                   final media = _results[i];
-                  final tracked = _tracked.contains(
-                    '${media.mediaType.value}_${media.id}',
-                  );
+                  final tracked = _tracked.contains(_mediaKey(media));
                   return _SearchRow(
                     media: media,
                     tracked: tracked,
@@ -324,20 +317,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   crossAxisSpacing: 8,
                   childAspectRatio: 0.7,
                 ),
-                itemCount:
-                    _visibleDiscoveryCount + (_loadingDiscoveryMore ? 1 : 0),
+                itemCount: _visibleDiscoveryCount,
                 itemBuilder: (context, i) {
-                  if (_loadingDiscoveryMore && i == _visibleDiscoveryCount) {
-                    return Center(
-                      child: CircularProgressIndicator(
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    );
-                  }
                   final media = _discoveryPool[i];
-                  final tracked = _tracked.contains(
-                    '${media.mediaType.value}_${media.id}',
-                  );
+                  final tracked = _tracked.contains(_mediaKey(media));
                   return Stack(
                     children: [
                       MediaCard(
