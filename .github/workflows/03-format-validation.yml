@@ -38,28 +38,29 @@ jobs:
       
       - name: 🔍 Check commit messages
         run: |
-          echo "Vérifying commits are in French..."
-          FRENCH_KEYWORDS="feat|fix|docs|style|refactor|test|chore|perf|amélioration|ajout|correction|suppression"
+          echo "Vérifying commit messages..."
           BASE="${{ github.base_ref }}"
-          
+
           COMMITS=$(git log origin/${BASE}..HEAD --format="%s" 2>/dev/null || true)
-          
+
           if [ -z "$COMMITS" ]; then
             echo "✓ Aucun commit à vérifier"
             exit 0
           fi
-          
+
           echo "Commits à vérifier:"
           echo "$COMMITS"
-          
-          INVALID=$(echo "$COMMITS" | grep -vE "^(${FRENCH_KEYWORDS})(\\([^)]+\\))?:" | grep -v "^Merge " || true)
-          
+
+          VALID_PREFIXES='^(feat|fix|docs|style|refactor|test|chore|perf|build|ci)(\([^)]+\))?: '
+
+          INVALID=$(echo "$COMMITS" | grep -vE "$VALID_PREFIXES" | grep -v "^Merge " || true)
+
           if [ -n "$INVALID" ]; then
             echo ""
             echo "❌ Commits invalides trouvés:"
             echo "$INVALID"
             echo ""
-            echo "Les messages doivent commencer par: feat:, fix:, docs:, style:, refactor:, test:, chore:, perf:"
+            echo "Les messages doivent commencer par un préfixe standard : feat:, fix:, docs:, style:, refactor:, test:, chore:, perf:, build:, ci:."
             exit 1
           fi
           echo "✓ Messages de commits valides"
