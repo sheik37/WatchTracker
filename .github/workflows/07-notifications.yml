@@ -5,6 +5,10 @@ on:
     workflows: ['📱 CI Flutter', '🔌 CI Backend API']
     types: [completed]
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   notify_on_failure:
     name: 🔴 Alert on Failure

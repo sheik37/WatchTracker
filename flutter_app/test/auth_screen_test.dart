@@ -312,5 +312,4 @@ void main() {
     expect(find.textContaining('Réessaie dans '), findsOneWidget);
     expect(find.textContaining('Renvoyer l\'email ('), findsNothing);
   });
-
 }
