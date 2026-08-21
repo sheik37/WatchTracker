@@ -49,6 +49,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
   bool _isRegisterMode = false;
+  bool _showPassword = false;
 
   bool get _hasMinLength => _passwordCtrl.text.length >= 10;
   bool get _hasLower => _passwordCtrl.text
@@ -225,9 +226,21 @@ class _AuthScreenState extends State<AuthScreen> {
                       label: _isRegisterMode
                           ? 'Mot de passe (10+, min/maj/chiffre/symbole)'
                           : 'Mot de passe',
-                      obscureText: true,
+                      obscureText: !_showPassword,
                       enabled: !widget.isLoading,
                       onChanged: (_) => setState(() {}),
+                      suffixIcon: IconButton(
+                        onPressed: () =>
+                            setState(() => _showPassword = !_showPassword),
+                        icon: Icon(
+                          _showPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                        tooltip: _showPassword
+                            ? 'Masquer le mot de passe'
+                            : 'Afficher le mot de passe',
+                      ),
                     ),
                     if (_shouldShowOtp) ...[
                       const SizedBox(height: 12),
@@ -395,6 +408,7 @@ class _OutlinedTextField extends StatelessWidget {
     this.inputFormatters,
     this.enabled = true,
     this.onChanged,
+    this.suffixIcon,
   });
 
   final TextEditingController controller;
@@ -404,6 +418,7 @@ class _OutlinedTextField extends StatelessWidget {
   final List<TextInputFormatter>? inputFormatters;
   final bool enabled;
   final ValueChanged<String>? onChanged;
+  final Widget? suffixIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +432,7 @@ class _OutlinedTextField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
+        suffixIcon: suffixIcon,
       ),
     );
   }

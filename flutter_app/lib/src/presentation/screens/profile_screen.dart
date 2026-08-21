@@ -877,7 +877,7 @@ class _SettingsBody extends StatelessWidget {
   }
 }
 
-class _ChangePasswordBody extends StatelessWidget {
+class _ChangePasswordBody extends StatefulWidget {
   const _ChangePasswordBody({
     required this.currentController,
     required this.newController,
@@ -897,54 +897,101 @@ class _ChangePasswordBody extends StatelessWidget {
   final VoidCallback onSubmit;
 
   @override
+  State<_ChangePasswordBody> createState() => _ChangePasswordBodyState();
+}
+
+class _ChangePasswordBodyState extends State<_ChangePasswordBody> {
+  bool _showCurrentPassword = false;
+  bool _showNewPassword = false;
+  bool _showConfirmPassword = false;
+
+  @override
   Widget build(BuildContext context) {
     final canSubmit =
-        currentController.text.isNotEmpty &&
-        newController.text.isNotEmpty &&
-        confirmController.text.isNotEmpty &&
-        !loading;
+        widget.currentController.text.isNotEmpty &&
+        widget.newController.text.isNotEmpty &&
+        widget.confirmController.text.isNotEmpty &&
+        !widget.loading;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         TextField(
-          controller: currentController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.currentController,
+          obscureText: !_showCurrentPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Mot de passe actuel',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () => setState(
+                () => _showCurrentPassword = !_showCurrentPassword,
+              ),
+              icon: Icon(
+                _showCurrentPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showCurrentPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
         const SizedBox(height: 12),
         TextField(
-          controller: newController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.newController,
+          obscureText: !_showNewPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Nouveau mot de passe',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  setState(() => _showNewPassword = !_showNewPassword),
+              icon: Icon(
+                _showNewPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showNewPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
-        _PasswordCriteriaChecklist(password: newController.text),
+        _PasswordCriteriaChecklist(password: widget.newController.text),
         const SizedBox(height: 12),
         TextField(
-          controller: confirmController,
-          obscureText: true,
-          enabled: !loading,
-          onChanged: (_) => onChanged(),
-          decoration: const InputDecoration(
+          controller: widget.confirmController,
+          obscureText: !_showConfirmPassword,
+          enabled: !widget.loading,
+          onChanged: (_) => widget.onChanged(),
+          decoration: InputDecoration(
             labelText: 'Confirmer le mot de passe',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              onPressed: () => setState(
+                () => _showConfirmPassword = !_showConfirmPassword,
+              ),
+              icon: Icon(
+                _showConfirmPassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              tooltip: _showConfirmPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe',
+            ),
           ),
         ),
-        _PasswordCriteriaChecklist(password: confirmController.text),
-        if (error != null) ...[
+        _PasswordCriteriaChecklist(password: widget.confirmController.text),
+        if (widget.error != null) ...[
           const SizedBox(height: 8),
           Text(
-            error!,
+            widget.error!,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ],
@@ -952,9 +999,9 @@ class _ChangePasswordBody extends StatelessWidget {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: canSubmit ? onSubmit : null,
+            onPressed: canSubmit ? widget.onSubmit : null,
             child: Text(
-              loading ? 'Modification...' : 'Modifier le mot de passe',
+              widget.loading ? 'Modification...' : 'Modifier le mot de passe',
             ),
           ),
         ),
