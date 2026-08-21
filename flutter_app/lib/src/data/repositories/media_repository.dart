@@ -34,6 +34,9 @@ class MediaRepository {
   void setBackendBaseUrl(String? baseUrl) {
     final normalized = (baseUrl ?? '').trim();
     _backendBaseUrl = normalized.isEmpty ? null : normalized;
+    if (kDebugMode) {
+      print('DEBUG: setBackendBaseUrl = $_backendBaseUrl');
+    }
     _rebuildBackendApi();
   }
 
