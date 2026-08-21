@@ -1,19 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/app_config.dart';
+import '../../core/app_update_launcher.dart';
 import '../../core/app_update_service.dart';
 import '../../data/models/auth_models.dart';
 import '../../data/repositories/media_repository.dart';
-
-String? _extractFirstHttpUrl(String text) {
-  final match = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(text);
-  final candidate = match?.group(0);
-  if (candidate == null || candidate.isEmpty) return null;
-  final uri = Uri.tryParse(candidate);
-  if (uri == null || !uri.hasScheme || !uri.hasAuthority) return null;
-  return uri.toString();
-}
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -36,9 +27,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const MethodChannel _systemChannel = MethodChannel(
-    'watchtracker/system',
-  );
   bool _showSettings = false;
   bool _showChangePassword = false;
   bool _showDeleteAccount = false;
@@ -64,6 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _deleteError;
 
   final AppUpdateService _appUpdateService = AppUpdateService();
+  final AppUpdateLauncher _appUpdateLauncher = AppUpdateLauncher();
   bool _checkingForUpdates = false;
   String? _appUpdateError;
   AppUpdateResult? _appUpdateResult;
@@ -152,66 +141,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _openUpdateDownload() async {
-    final url = _appUpdateResult?.downloadUrl?.trim();
-    if (url == null || url.isEmpty) {
-      setState(() {
-        _appUpdateError =
-            'Aucun lien de téléchargement configuré pour cette plateforme.';
-      });
-      return;
+    try {
+      await _appUpdateLauncher.openDownload(_appUpdateResult?.downloadUrl);
+    } on AppUpdateLaunchException catch (e) {
+      if (!mounted) return;
+      setState(() => _appUpdateError = e.message);
     }
-    await _openExternalUrl(
-      url: url,
-      invalidUrlError: 'Lien de mise à jour invalide.',
-      openError: 'Impossible de lancer le téléchargement de la mise à jour.',
-      mode: 'download',
-    );
   }
 
   Future<void> _openReleaseNotes() async {
-    final notes = _appUpdateResult?.releaseNotes?.trim();
-    final url = notes == null ? null : _extractFirstHttpUrl(notes);
-    if (url == null) {
-      setState(() {
-        _appUpdateError = 'Lien de note de version invalide.';
-      });
-      return;
-    }
-    await _openExternalUrl(
-      url: url,
-      invalidUrlError: 'Lien de note de version invalide.',
-      openError: 'Impossible d\'ouvrir automatiquement la note de version.',
-    );
-  }
-
-  Future<void> _openExternalUrl({
-    required String url,
-    required String invalidUrlError,
-    required String openError,
-    String mode = 'view',
-  }) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      setState(() {
-        _appUpdateError = invalidUrlError;
-      });
-      return;
-    }
-    var opened = false;
     try {
-      opened =
-          await _systemChannel.invokeMethod<bool>('openUrl', <String, dynamic>{
-            'url': uri.toString(),
-            'mode': mode,
-          }) ??
-          false;
-    } on PlatformException {
-      opened = false;
-    }
-    if (!opened && mounted) {
-      setState(() {
-        _appUpdateError = openError;
-      });
+      await _appUpdateLauncher.openReleaseNotes(_appUpdateResult?.releaseNotes);
+    } on AppUpdateLaunchException catch (e) {
+      if (!mounted) return;
+      setState(() => _appUpdateError = e.message);
     }
   }
 
@@ -1080,7 +1023,7 @@ class _AboutBody extends StatelessWidget {
     final releaseNotes = appUpdateResult?.releaseNotes?.trim();
     final releaseNotesUrl = releaseNotes == null || releaseNotes.isEmpty
         ? null
-        : _extractFirstHttpUrl(releaseNotes);
+        : AppUpdateLauncher.extractFirstHttpUrl(releaseNotes);
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),

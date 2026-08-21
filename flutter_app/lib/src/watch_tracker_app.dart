@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
+import 'core/app_update_launcher.dart';
+import 'core/app_update_service.dart';
 import 'presentation/theme/app_theme.dart';
 import 'data/local/auth_session_store.dart';
 import 'data/local/watchtracker_database.dart';
@@ -25,6 +27,11 @@ class WatchTrackerApp extends StatefulWidget {
 class _WatchTrackerAppState extends State<WatchTrackerApp> {
   late final AuthSessionStore _sessionStore;
   late final MediaRepository _repository;
+  final AppUpdateService _appUpdateService = AppUpdateService();
+  final AppUpdateLauncher _appUpdateLauncher = AppUpdateLauncher();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   bool _bootLoading = true;
   bool _authLoading = false;
@@ -40,6 +47,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   int? _attemptsRemaining;
   int? _resendUntilMillis;
   int? _forgotUntilMillis;
+  bool _startupUpdateCheckStarted = false;
+  bool _startupUpdatePromptShown = false;
 
   @override
   void initState() {
@@ -54,6 +63,12 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       backendBaseUrl: AppConfig.backendBaseUrl,
     );
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _appUpdateService.dispose();
+    super.dispose();
   }
 
   void _startRetryCountdown(int seconds) {
@@ -124,7 +139,114 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
         } catch (_) {}
       }
     }
-    if (mounted) setState(() => _bootLoading = false);
+    if (mounted) {
+      setState(() => _bootLoading = false);
+      _checkForStartupUpdateIfNeeded();
+    }
+  }
+
+  void _checkForStartupUpdateIfNeeded() {
+    if (_startupUpdateCheckStarted) return;
+    _startupUpdateCheckStarted = true;
+    _checkForStartupUpdate();
+  }
+
+  Future<void> _checkForStartupUpdate() async {
+    try {
+      final result = await _appUpdateService.checkForUpdates();
+      if (!mounted || !result.isUpdateAvailable || _startupUpdatePromptShown) {
+        return;
+      }
+      _startupUpdatePromptShown = true;
+      await _presentStartupUpdateDialog(result);
+    } catch (_) {
+      // Ignore startup update failures to avoid blocking app launch.
+    }
+  }
+
+  Future<void> _presentStartupUpdateDialog(AppUpdateResult result) async {
+    if (!mounted) return;
+    if (_navigatorKey.currentContext != null) {
+      await _showStartupUpdateDialog(result);
+      return;
+    }
+
+    WidgetsBinding.instance.scheduleFrame();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _presentStartupUpdateDialog(result);
+    });
+  }
+
+  Future<void> _showStartupUpdateDialog(AppUpdateResult result) async {
+    final dialogContext = _navigatorKey.currentContext;
+    if (dialogContext == null) return;
+    final releaseNotes = result.releaseNotes?.trim();
+    final hasReleaseNotes =
+        releaseNotes != null &&
+        AppUpdateLauncher.extractFirstHttpUrl(releaseNotes) != null;
+
+    await showDialog<void>(
+      context: dialogContext,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Mise à jour disponible'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Une nouvelle version de WatchTracker est disponible.',
+            ),
+            const SizedBox(height: 12),
+            Text('Version installée : ${result.currentLabel}'),
+            Text('Nouvelle version : ${result.latestLabel}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Plus tard'),
+          ),
+          if (hasReleaseNotes)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _openStartupReleaseNotes(result);
+              },
+              child: const Text('Voir la note'),
+            ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              await _openStartupUpdateDownload(result);
+            },
+            child: const Text('Télécharger'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openStartupUpdateDownload(AppUpdateResult result) async {
+    try {
+      await _appUpdateLauncher.openDownload(result.downloadUrl);
+    } on AppUpdateLaunchException catch (e) {
+      _showStartupUpdateError(e.message);
+    }
+  }
+
+  Future<void> _openStartupReleaseNotes(AppUpdateResult result) async {
+    try {
+      await _appUpdateLauncher.openReleaseNotes(result.releaseNotes);
+    } on AppUpdateLaunchException catch (e) {
+      _showStartupUpdateError(e.message);
+    }
+  }
+
+  void _showStartupUpdateError(String message) {
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _login(String email, String password, String? otpCode) async {
@@ -326,6 +448,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'WatchTracker',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
