@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
     super.key,
+    required this.appVersionLabel,
     required this.isLoading,
     required this.onLogin,
     required this.onRegister,
@@ -22,6 +23,7 @@ class AuthScreen extends StatefulWidget {
   });
 
   final bool isLoading;
+  final String appVersionLabel;
   final String? errorMessage;
   final String? infoMessage;
   final int? retryAfterSeconds;
@@ -128,231 +130,256 @@ class _AuthScreenState extends State<AuthScreen> {
     final forgotCooldown = widget.forgotCooldownSeconds ?? 0;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 48),
-              Image.asset(
-                'assets/images/watchtracker_logo.png',
-                width: 110,
-                height: 110,
-                errorBuilder: (_, _, _) => const Icon(
-                  Icons.movie_filter_rounded,
-                  size: 110,
-                  color: Color(0xFF006A6A),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'WatchTracker',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _isRegisterMode ? 'Inscription' : 'Connexion',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _isRegisterMode
-                    ? 'Crée un compte personnel pour ta propre liste.'
-                    : 'Connecte-toi pour charger ta liste personnelle.',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: _isRegisterMode
-                        ? OutlinedButton(
-                            onPressed: widget.isLoading
-                                ? null
-                                : () {
-                                    setState(() => _isRegisterMode = false);
-                                    widget.onModeChanged?.call();
-                                  },
-                            child: const Text('Connexion'),
-                          )
-                        : FilledButton(
-                            onPressed: null,
-                            child: const Text('Connexion'),
-                          ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _isRegisterMode
-                        ? FilledButton(
-                            onPressed: null,
-                            child: const Text('Inscription'),
-                          )
-                        : OutlinedButton(
-                            onPressed: widget.isLoading
-                                ? null
-                                : () {
-                                    setState(() => _isRegisterMode = true);
-                                    widget.onModeChanged?.call();
-                                  },
-                            child: const Text('Inscription'),
-                          ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _OutlinedTextField(
-                controller: _emailCtrl,
-                label: 'Adresse mail',
-                keyboardType: TextInputType.emailAddress,
-                enabled: !widget.isLoading,
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 12),
-              _OutlinedTextField(
-                controller: _passwordCtrl,
-                label: _isRegisterMode
-                    ? 'Mot de passe (10+, min/maj/chiffre/symbole)'
-                    : 'Mot de passe',
-                obscureText: true,
-                enabled: !widget.isLoading,
-                onChanged: (_) => setState(() {}),
-              ),
-              if (_shouldShowOtp) ...[
-                const SizedBox(height: 12),
-                _OutlinedTextField(
-                  controller: _otpCtrl,
-                  label: 'Code 2FA (admin)',
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(8),
-                  ],
-                  enabled: !widget.isLoading,
-                  onChanged: (_) => setState(() {}),
-                ),
-              ],
-              if (_isRegisterMode) ...[
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: _PasswordCriteria(
-                    checks: [
-                      ('10 caractères minimum', _hasMinLength),
-                      ('au moins une minuscule', _hasLower),
-                      ('au moins une majuscule', _hasUpper),
-                      ('au moins un chiffre', _hasDigit),
-                      ('au moins un symbole', _hasSymbol),
-                    ],
-                  ),
-                ),
-              ],
-              if (widget.errorMessage != null &&
-                  widget.errorMessage!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    widget.errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 48),
+                    Image.asset(
+                      'assets/images/watchtracker_logo.png',
+                      width: 110,
+                      height: 110,
+                      errorBuilder: (_, _, _) => const Icon(
+                        Icons.movie_filter_rounded,
+                        size: 110,
+                        color: Color(0xFF006A6A),
+                      ),
                     ),
-                  ),
-                ),
-              ],
-              if (widget.infoMessage != null &&
-                  widget.infoMessage!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    widget.infoMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
+                    const SizedBox(height: 4),
+                    Text(
+                      'WatchTracker',
+                      style: Theme.of(context).textTheme.headlineMedium,
                     ),
-                  ),
-                ),
-              ],
-              if (_isRateLimited) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Trop de tentatives. Réessaie dans ${widget.retryAfterSeconds}s.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                    const SizedBox(height: 4),
+                    Text(
+                      _isRegisterMode ? 'Inscription' : 'Connexion',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                  ),
-                ),
-              ] else if (widget.attemptsRemaining != null) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Tentatives restantes avant blocage : ${widget.attemptsRemaining}',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                    const SizedBox(height: 4),
+                    Text(
+                      _isRegisterMode
+                          ? 'Crée un compte personnel pour ta propre liste.'
+                          : 'Connecte-toi pour charger ta liste personnelle.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      textAlign: TextAlign.center,
                     ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _canSubmit ? _submit : null,
-                  child: widget.isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          _isRegisterMode ? 'Créer un compte' : 'Se connecter',
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _isRegisterMode
+                              ? OutlinedButton(
+                                  onPressed: widget.isLoading
+                                      ? null
+                                      : () {
+                                          setState(
+                                            () => _isRegisterMode = false,
+                                          );
+                                          widget.onModeChanged?.call();
+                                        },
+                                  child: const Text('Connexion'),
+                                )
+                              : FilledButton(
+                                  onPressed: null,
+                                  child: const Text('Connexion'),
+                                ),
                         ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _isRegisterMode
+                              ? FilledButton(
+                                  onPressed: null,
+                                  child: const Text('Inscription'),
+                                )
+                              : OutlinedButton(
+                                  onPressed: widget.isLoading
+                                      ? null
+                                      : () {
+                                          setState(
+                                            () => _isRegisterMode = true,
+                                          );
+                                          widget.onModeChanged?.call();
+                                        },
+                                  child: const Text('Inscription'),
+                                ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _OutlinedTextField(
+                      controller: _emailCtrl,
+                      label: 'Adresse mail',
+                      keyboardType: TextInputType.emailAddress,
+                      enabled: !widget.isLoading,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    _OutlinedTextField(
+                      controller: _passwordCtrl,
+                      label: _isRegisterMode
+                          ? 'Mot de passe (10+, min/maj/chiffre/symbole)'
+                          : 'Mot de passe',
+                      obscureText: true,
+                      enabled: !widget.isLoading,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    if (_shouldShowOtp) ...[
+                      const SizedBox(height: 12),
+                      _OutlinedTextField(
+                        controller: _otpCtrl,
+                        label: 'Code 2FA (admin)',
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(8),
+                        ],
+                        enabled: !widget.isLoading,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ],
+                    if (_isRegisterMode) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: _PasswordCriteria(
+                          checks: [
+                            ('10 caractères minimum', _hasMinLength),
+                            ('au moins une minuscule', _hasLower),
+                            ('au moins une majuscule', _hasUpper),
+                            ('au moins un chiffre', _hasDigit),
+                            ('au moins un symbole', _hasSymbol),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (widget.errorMessage != null &&
+                        widget.errorMessage!.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          widget.errorMessage!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (widget.infoMessage != null &&
+                        widget.infoMessage!.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          widget.infoMessage!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_isRateLimited) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Trop de tentatives. Réessaie dans ${widget.retryAfterSeconds}s.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ] else if (widget.attemptsRemaining != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Tentatives restantes avant blocage : ${widget.attemptsRemaining}',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _canSubmit ? _submit : null,
+                        child: widget.isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                _isRegisterMode
+                                    ? 'Créer un compte'
+                                    : 'Se connecter',
+                              ),
+                      ),
+                    ),
+                    if (!_isRegisterMode) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _canForgot
+                              ? () => widget.onForgotPassword(
+                                  _emailCtrl.text.trim(),
+                                )
+                              : null,
+                          child: Text(
+                            forgotCooldown > 0
+                                ? 'Mot de passe oublié (${forgotCooldown}s)'
+                                : 'Mot de passe oublié',
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_isRegisterMode && widget.showResendVerification) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _canResend
+                              ? () => widget.onResendVerification(
+                                  _emailCtrl.text.trim(),
+                                )
+                              : null,
+                          child: Text(
+                            resendCooldown > 0
+                                ? 'Renvoyer l\'email (${resendCooldown}s)'
+                                : 'Renvoyer l\'email de vérification',
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                  ],
                 ),
               ),
-              if (!_isRegisterMode) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _canForgot
-                        ? () => widget.onForgotPassword(_emailCtrl.text.trim())
-                        : null,
-                    child: Text(
-                      forgotCooldown > 0
-                          ? 'Mot de passe oublié (${forgotCooldown}s)'
-                          : 'Mot de passe oublié',
-                    ),
-                  ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Text(
+                'Version ${widget.appVersionLabel}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-              ],
-              if (_isRegisterMode && widget.showResendVerification) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _canResend
-                        ? () => widget.onResendVerification(
-                            _emailCtrl.text.trim(),
-                          )
-                        : null,
-                    child: Text(
-                      resendCooldown > 0
-                          ? 'Renvoyer l\'email (${resendCooldown}s)'
-                          : 'Renvoyer l\'email de vérification',
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 32),
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );

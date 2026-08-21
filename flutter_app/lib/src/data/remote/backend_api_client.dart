@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -255,18 +256,29 @@ class BackendApiClient {
       ..body = body == null ? '' : jsonEncode(body);
     late http.Response response;
     try {
-      final streamed = await _client.send(request);
-      response = await http.Response.fromStream(streamed);
-    } on SocketException {
+      final streamed = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 15));
+      response = await http.Response.fromStream(streamed)
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      final host = '${uri.host}:${uri.port}';
+      throw AuthException(
+        'Délai dépassé pour contacter l\'API ($host). Vérifie ta connexion.',
+      );
+    } on SocketException catch (e) {
+      final host = '${uri.host}:${uri.port}';
       if (uri.scheme.toLowerCase() == 'http') {
-        throw const AuthException(
-          'Impossible de contacter l\'API. BACKEND_BASE_URL utilise HTTP; utilise HTTPS pour la version Android release.',
+        throw AuthException(
+          'Impossible de contacter l\'API ($host). Utilise HTTPS pour Android release.',
         );
       }
-      throw const AuthException('Impossible de contacter l\'API.');
-    } on HandshakeException {
-      throw const AuthException(
-        'Connexion API sécurisée impossible (certificat TLS invalide).',
+      throw AuthException(
+        'Impossible de contacter l\'API ($host). Vérifie que le serveur est accessible. (${e.message})',
+      );
+    } on HandshakeException catch (e) {
+      throw AuthException(
+        'Certificat TLS invalide (${uri.host}). Vérifie le certificat SSL. (${e.message})',
       );
     }
     final raw = response.body.isEmpty ? '{}' : response.body;

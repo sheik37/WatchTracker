@@ -362,6 +362,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           : (_token == null
                 ? AuthScreen(
                     isLoading: _authLoading,
+                    appVersionLabel:
+                        '${AppConfig.appVersion}+${AppConfig.appBuildNumber}',
                     errorMessage: _authError,
                     infoMessage: _authInfo,
                     retryAfterSeconds: _retryAfterSeconds > 0
