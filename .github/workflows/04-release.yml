@@ -69,6 +69,26 @@ jobs:
               ;;
           esac
 
+      - name: Prepare Android signing config
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            mkdir -p flutter_app/android/keystore
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > flutter_app/android/keystore/watchtracker-release.keystore
+            cat > flutter_app/android/key.properties <<EOF
+storeFile=../android/keystore/watchtracker-release.keystore
+storePassword=$ANDROID_KEYSTORE_PASSWORD
+keyAlias=$ANDROID_KEY_ALIAS
+keyPassword=$ANDROID_KEY_PASSWORD
+EOF
+          else
+            echo "::warning::Android signing secrets missing; release APK will fall back to debug key. This will prevent future upgrades if the app was previously signed with a different certificate."
+          fi
+
       - name: Build APK
         run: |
           cd flutter_app

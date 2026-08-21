@@ -1,0 +1,4 @@
+storeFile=../keystore/watchtracker-release.keystore
+storePassword=CHANGE_ME
+keyAlias=watchtracker
+keyPassword=CHANGE_ME
