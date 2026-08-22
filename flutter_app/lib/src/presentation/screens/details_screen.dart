@@ -1791,6 +1791,35 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
   }
 
+  @override
+  void didUpdateWidget(EpisodeDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Merge in any new watched states/timestamps from the parent (e.g. after
+    // a "mark previous episodes" batch) without overwriting local toggles that
+    // have not yet been confirmed by the parent.
+    for (final entry in widget.watchedEpisodes) {
+      if (!(_watchedLocal[entry] ?? false)) {
+        _watchedLocal[entry] = true;
+      }
+    }
+    for (final key in (_watchedLocal.keys.toList())) {
+      if (!widget.watchedEpisodes.contains(key)) {
+        _watchedLocal[key] = false;
+      }
+    }
+    for (final entry in widget.episodeWatchedAt.entries) {
+      _watchedAtLocal.putIfAbsent(entry.key, () => entry.value);
+      if ((_watchedAtLocal[entry.key] ?? 0) < entry.value) {
+        _watchedAtLocal[entry.key] = entry.value;
+      }
+    }
+    for (final key in (_watchedAtLocal.keys.toList())) {
+      if (!widget.watchedEpisodes.contains(key)) {
+        _watchedAtLocal.remove(key);
+      }
+    }
+  }
+
   Episode get _current => widget.episodes[_currentIndex];
 
   bool get _isWatched =>

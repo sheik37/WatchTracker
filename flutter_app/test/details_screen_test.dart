@@ -284,4 +284,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Ouvrir'), findsOneWidget);
   });
+
+  testWidgets(
+    'watch date appears on previous episode after parent updates episodeWatchedAt',
+    (tester) async {
+      final millis = DateTime(2025, 6, 10).millisecondsSinceEpoch;
+
+      // Start: episode 2 is open, neither episode is watched
+      await tester.pumpWidget(buildPage(initialIndex: 1));
+      await tester.pumpAndSettle();
+
+      // No watch date chip yet
+      expect(find.textContaining('Vu le'), findsNothing);
+
+      // Simulate parent marking both ep1 and ep2 watched with the same timestamp
+      await tester.pumpWidget(
+        buildPage(
+          initialIndex: 1,
+          watchedEpisodes: {'1_1', '1_2'},
+          episodeWatchedAt: {'1_1': millis, '1_2': millis},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Ep2 is current — should show the date
+      expect(find.textContaining('Vu le'), findsOneWidget);
+      expect(find.textContaining('10/06/2025'), findsOneWidget);
+
+      // Navigate to previous episode (ep1, which was also marked in the batch)
+      await tester.tap(find.text('Précédent'));
+      await tester.pumpAndSettle();
+
+      // Ep1 should also show the same date without needing to leave the page
+      expect(find.textContaining('Vu le'), findsOneWidget);
+      expect(find.textContaining('10/06/2025'), findsOneWidget);
+    },
+  );
 }
