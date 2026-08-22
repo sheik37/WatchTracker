@@ -7,6 +7,7 @@ import '../../data/models/backend_models.dart';
 import '../../data/models/details_models.dart';
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
+import '../theme/slide_up_route.dart';
 
 class DetailsScreen extends StatefulWidget {
   const DetailsScreen({
@@ -661,7 +662,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     if (index < 0) return;
 
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+      SlideUpRoute(
         builder: (ctx) => EpisodeDetailPage(
           episodes: allEpisodes,
           initialIndex: index,
