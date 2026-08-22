@@ -2114,6 +2114,11 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
         .where((ep) => ep.seasonNumber == _shownSeason)
         .toList();
     final seasonLabel = _shownSeason == 0 ? 'Spéciaux' : 'Saison $_shownSeason';
+    final watchedCount = seasonEpisodes
+        .where((ep) =>
+            widget.watchedLocal['${ep.seasonNumber}_${ep.episodeNumber}'] ??
+            false)
+        .length;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2139,11 +2144,22 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
                 icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
               ),
               Expanded(
-                child: Text(
-                  seasonLabel,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                child: Column(
+                  children: [
+                    Text(
+                      seasonLabel,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '$watchedCount / ${seasonEpisodes.length} vus',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey,
+                          ),
+                    ),
+                  ],
                 ),
               ),
               IconButton(
