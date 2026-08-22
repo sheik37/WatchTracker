@@ -1865,10 +1865,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 
-  List<Episode> get _currentSeasonEpisodes => widget.episodes
-      .where((ep) => ep.seasonNumber == _current.seasonNumber)
-      .toList();
-
   void _showSeasonSheet(BuildContext context) {
     // Liste ordonnée des numéros de saison (même ordre que _orderedSeasons)
     final seasonNumbers = widget.seasonOffsets.keys.toList()

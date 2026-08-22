@@ -84,7 +84,7 @@ void main() {
         seasonOffsets: seasonOffsets ?? defaultOffsets,
         seriesTitle: seriesTitle ?? defaultSeriesTitle,
         isReleasedCheck: isReleasedCheck ?? (ep) => ep.airDate != '2099-01-01',
-        onToggleWatched: onToggleWatched ?? (_, __) async {},
+        onToggleWatched: onToggleWatched ?? (_, _) async {},
         getProgress:
             getProgress ??
             () => (watched: watchedEpisodes, watchedAt: episodeWatchedAt),
@@ -315,7 +315,7 @@ void main() {
                     seasonOffsets: defaultOffsets,
                     seriesTitle: defaultSeriesTitle,
                     isReleasedCheck: (_) => true,
-                    onToggleWatched: (_, __) async {},
+                    onToggleWatched: (_, _) async {},
                     getProgress: () => (watched: const {}, watchedAt: const {}),
                   ),
                 ),
