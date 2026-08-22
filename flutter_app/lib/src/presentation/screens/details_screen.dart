@@ -742,6 +742,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
               progressValue: progressColor != null
                   ? _progressValue(details)
                   : null,
+              watchedGlobal: _tracked && isTV
+                  ? _watchedEpisodes.where((k) => !k.startsWith('0_')).length
+                  : null,
+              totalGlobal: _tracked && isTV
+                  ? details.seasons
+                      .where((s) => s.seasonNumber != 0)
+                      .fold<int>(0, (acc, s) => acc + s.episodeCount)
+                  : null,
               onBack: () => Navigator.of(context).pop(),
               onToggleWatchlist: _toggleWatchlist,
               statusBarHeight: statusBarHeight,
@@ -845,6 +853,8 @@ class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.onBack,
     required this.onToggleWatchlist,
     required this.statusBarHeight,
+    this.watchedGlobal,
+    this.totalGlobal,
   });
 
   final MediaDetails details;
@@ -857,6 +867,8 @@ class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
   final VoidCallback onBack;
   final VoidCallback onToggleWatchlist;
   final double statusBarHeight;
+  final int? watchedGlobal;
+  final int? totalGlobal;
 
   static const double _headerMaxBase = 210;
   static const double _headerMinBase = 59;
@@ -899,6 +911,8 @@ class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
             contentAlpha: contentAlpha,
             progressColor: progressColor,
             progressValue: progressValue,
+            watchedGlobal: watchedGlobal,
+            totalGlobal: totalGlobal,
           ),
         ),
 
@@ -978,12 +992,16 @@ class _MediaHeader extends StatelessWidget {
     required this.contentAlpha,
     this.progressColor,
     this.progressValue,
+    this.watchedGlobal,
+    this.totalGlobal,
   });
 
   final MediaDetails details;
   final double contentAlpha;
   final Color? progressColor;
   final double? progressValue;
+  final int? watchedGlobal;
+  final int? totalGlobal;
 
   @override
   Widget build(BuildContext context) {
@@ -1046,6 +1064,19 @@ class _MediaHeader extends StatelessWidget {
                         ),
                         Text(
                           details.tvStatus!.label,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                      if (watchedGlobal != null && totalGlobal != null && totalGlobal! > 0) ...[
+                        const Text(
+                          ' • ',
+                          style: TextStyle(color: Colors.white70, fontSize: 18),
+                        ),
+                        Text(
+                          '$watchedGlobal / $totalGlobal épisodes vus',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 14,
