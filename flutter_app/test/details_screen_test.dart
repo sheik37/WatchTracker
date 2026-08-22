@@ -195,31 +195,27 @@ void main() {
     expect(nextButton.onPressed, isNull);
   });
 
-  testWidgets('menu shows Marquer comme vu when episode not watched', (
+  testWidgets('bouton affiche Marquer comme vu quand épisode non vu', (
     tester,
   ) async {
     await tester.pumpWidget(buildPage());
-
-    await tester.tap(find.byType(PopupMenuButton<String>));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('Marquer comme vu'), findsOneWidget);
     expect(find.text('Marquer non vu'), findsNothing);
   });
 
-  testWidgets('menu shows Marquer non vu when episode is watched', (
+  testWidgets('bouton affiche Marquer non vu quand épisode vu', (
     tester,
   ) async {
     await tester.pumpWidget(buildPage(watchedEpisodes: {'1_1'}));
-
-    await tester.tap(find.byType(PopupMenuButton<String>));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('Marquer non vu'), findsOneWidget);
     expect(find.text('Marquer comme vu'), findsNothing);
   });
 
-  testWidgets('toggling via menu calls the callback', (tester) async {
+  testWidgets('le bouton appelle le callback au tap', (tester) async {
     Episode? toggledEpisode;
     bool? toggledValue;
 
@@ -231,9 +227,8 @@ void main() {
         },
       ),
     );
+    await tester.pump();
 
-    await tester.tap(find.byType(PopupMenuButton<String>));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Marquer comme vu'));
     await tester.pump();
 
@@ -241,16 +236,12 @@ void main() {
     expect(toggledEpisode?.episodeNumber, 1);
   });
 
-  testWidgets('menu item is disabled for unreleased episodes', (tester) async {
+  testWidgets('le bouton est désactivé pour les épisodes non diffusés', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 2));
+    await tester.pump();
 
-    await tester.tap(find.byType(PopupMenuButton<String>));
-    await tester.pumpAndSettle();
-
-    final item = tester.widget<PopupMenuItem<String>>(
-      find.byType(PopupMenuItem<String>),
-    );
-    expect(item.enabled, isFalse);
+    final btn = tester.widget<FilledButton>(find.byType(FilledButton));
+    expect(btn.onPressed, isNull);
   });
 
   testWidgets('supports back navigation', (tester) async {
@@ -317,8 +308,6 @@ void main() {
       expect(find.textContaining('Vu le'), findsNothing);
 
       // Trigger toggle on ep2 (current)
-      await tester.tap(find.byType(PopupMenuButton<String>));
-      await tester.pumpAndSettle();
       await tester.tap(find.text('Marquer comme vu'));
       await tester.pumpAndSettle();
 

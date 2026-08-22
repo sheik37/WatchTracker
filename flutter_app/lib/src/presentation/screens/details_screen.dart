@@ -1826,6 +1826,22 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     );
   }
 
+  Future<void> _toggleEpisode(Episode ep) async {
+    final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final target = !(_watchedLocal[k] ?? false);
+    final nowMillis = DateTime.now().millisecondsSinceEpoch;
+    setState(() {
+      _watchedLocal[k] = target;
+      if (target) {
+        _watchedAtLocal[k] = nowMillis;
+      } else {
+        _watchedAtLocal.remove(k);
+      }
+    });
+    await widget.onToggleWatched(ep, target);
+    if (mounted) setState(_syncFromProgress);
+  }
+
   Episode get _current => widget.episodes[_currentIndex];
 
   bool get _isWatched =>
@@ -1853,6 +1869,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final ep = widget.episodes[index];
     final k = '${ep.seasonNumber}_${ep.episodeNumber}';
     final isWatched = _watchedLocal[k] ?? false;
+    final isReleased = widget.isReleasedCheck(ep);
     final watchedLabel = isWatched ? _watchedDateLabel(k) : null;
     final runtimeLabel = ep.runtime != null ? '${ep.runtime} min' : 'Inconnue';
     final airDateLabel = ep.airDate?.isNotEmpty == true
@@ -1924,6 +1941,21 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             ],
           ),
           const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: isWatched
+                ? OutlinedButton.icon(
+                    onPressed: () => _toggleEpisode(ep),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    label: const Text('Marquer non vu'),
+                  )
+                : FilledButton.icon(
+                    onPressed: isReleased ? () => _toggleEpisode(ep) : null,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Marquer comme vu'),
+                  ),
+          ),
+          const SizedBox(height: 16),
           Text(
             'Synopsis',
             style: Theme.of(context).textTheme.titleMedium
@@ -1940,41 +1972,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final episode = _current;
-    final key = '${episode.seasonNumber}_${episode.episodeNumber}';
     final hasPrev = _currentIndex > 0;
     final hasNext = _currentIndex < widget.episodes.length - 1;
 
     return Scaffold(
-      appBar: AppBar(
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'toggle') {
-                final target = !_isWatched;
-                final nowMillis = DateTime.now().millisecondsSinceEpoch;
-                setState(() {
-                  _watchedLocal[key] = target;
-                  if (target) {
-                    _watchedAtLocal[key] = nowMillis;
-                  } else {
-                    _watchedAtLocal.remove(key);
-                  }
-                });
-                await widget.onToggleWatched(_current, target);
-                if (mounted) setState(_syncFromProgress);
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: 'toggle',
-                enabled: _isReleased,
-                child: Text(_isWatched ? 'Marquer non vu' : 'Marquer comme vu'),
-              ),
-            ],
-          ),
-        ],
-      ),
+      appBar: AppBar(),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
