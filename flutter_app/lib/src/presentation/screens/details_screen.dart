@@ -29,6 +29,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   bool _loading = true;
   String? _error;
   Set<String> _watchedEpisodes = {};
+  Map<String, int> _episodeWatchedAt = {};
   int? _movieWatchedAtMillis;
   bool _showEpisodes = false;
   final ScrollController _scrollCtrl = ScrollController();
@@ -78,10 +79,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
           .where((p) => p.isWatched)
           .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
           .toSet();
+      final watchedAtMap = {
+        for (final p in progressList.where((p) => p.isWatched))
+          '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
+      };
       _details = details;
       _tracked = tracked;
       _status = status;
       _watchedEpisodes = watchedSet;
+      _episodeWatchedAt = watchedAtMap;
       _movieWatchedAtMillis =
           details.mediaType == MediaType.movie && status == WatchStatus.watched
           ? DateTime.now().millisecondsSinceEpoch
@@ -216,13 +222,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
     if (details == null) return;
     final key = '${episode.seasonNumber}_${episode.episodeNumber}';
     final previous = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final next = <String>{..._watchedEpisodes};
+    final nextAt = Map<String, int>.from(_episodeWatchedAt);
     if (watched) {
       next.add(key);
+      nextAt[key] = DateTime.now().millisecondsSinceEpoch;
     } else {
       next.remove(key);
+      nextAt.remove(key);
     }
-    setState(() => _watchedEpisodes = next);
+    setState(() {
+      _watchedEpisodes = next;
+      _episodeWatchedAt = nextAt;
+    });
     _updateTvStatus(details);
     if (watched) {
       await _ensureTvTrackedForEpisodeUpdate(details);
@@ -236,7 +249,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _watchedEpisodes = previous);
+      setState(() {
+        _watchedEpisodes = previous;
+        _episodeWatchedAt = previousAt;
+      });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour l\'épisode: $e')),
@@ -549,22 +565,22 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final seasonOffset = offsets[episode.seasonNumber] ?? 0;
     final expectedPreviousCount = seasonOffset + episode.episodeNumber - 1;
 
-    final watchedPositions = _watchedEpisodes
-        .where((k) => !k.startsWith('0_'))
-        .map((k) {
-          final idx = k.indexOf('_');
-          if (idx <= 0 || idx >= k.length - 1) return null;
-          final s = int.tryParse(k.substring(0, idx));
-          final e = int.tryParse(k.substring(idx + 1));
-          if (s == null || e == null) return null;
-          return s * 10000 + e;
-        })
-        .whereType<int>()
-        .toList()
-      ..sort();
+    final watchedPositions =
+        _watchedEpisodes
+            .where((k) => !k.startsWith('0_'))
+            .map((k) {
+              final idx = k.indexOf('_');
+              if (idx <= 0 || idx >= k.length - 1) return null;
+              final s = int.tryParse(k.substring(0, idx));
+              final e = int.tryParse(k.substring(idx + 1));
+              if (s == null || e == null) return null;
+              return s * 10000 + e;
+            })
+            .whereType<int>()
+            .toList()
+          ..sort();
 
-    final currentKey =
-        episode.seasonNumber * 10000 + episode.episodeNumber;
+    final currentKey = episode.seasonNumber * 10000 + episode.episodeNumber;
     var watchedPrevious = 0;
     for (final k in watchedPositions) {
       if (k < currentKey) watchedPrevious++;
@@ -624,6 +640,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           episodes: allEpisodes,
           initialIndex: index,
           watchedEpisodes: _watchedEpisodes,
+          episodeWatchedAt: _episodeWatchedAt,
           seasonOffsets: offsets,
           seriesTitle: details.title,
           isReleasedCheck: _isReleasedEpisode,
@@ -1253,7 +1270,8 @@ class _SeasonSection extends StatefulWidget {
   final Future<void> Function(Season, bool) onMarkOnlySeasonWatched;
   final Future<void> Function(Episode) onMarkEpisodeUpTo;
   final Future<void> Function(Episode) onOpenEpisode;
-  final void Function(int seasonNumber, List<Episode> episodes) onEpisodesLoaded;
+  final void Function(int seasonNumber, List<Episode> episodes)
+  onEpisodesLoaded;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -1309,7 +1327,10 @@ class _SeasonSectionState extends State<_SeasonSection> {
     if (_episodes.isNotEmpty || widget.season.episodeCount <= 0) return;
     if (widget.season.episodes.isNotEmpty) {
       setState(() => _episodes = widget.season.episodes);
-      widget.onEpisodesLoaded(widget.season.seasonNumber, widget.season.episodes);
+      widget.onEpisodesLoaded(
+        widget.season.seasonNumber,
+        widget.season.episodes,
+      );
       return;
     }
     setState(() => _loadingEpisodes = true);
@@ -1706,6 +1727,7 @@ class EpisodeDetailPage extends StatefulWidget {
     required this.episodes,
     required this.initialIndex,
     required this.watchedEpisodes,
+    required this.episodeWatchedAt,
     required this.seasonOffsets,
     required this.seriesTitle,
     required this.isReleasedCheck,
@@ -1715,6 +1737,7 @@ class EpisodeDetailPage extends StatefulWidget {
   final List<Episode> episodes;
   final int initialIndex;
   final Set<String> watchedEpisodes;
+  final Map<String, int> episodeWatchedAt;
   final Map<int, int> seasonOffsets;
   final String seriesTitle;
   final bool Function(Episode) isReleasedCheck;
@@ -1727,6 +1750,7 @@ class EpisodeDetailPage extends StatefulWidget {
 class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   late int _currentIndex;
   late final Map<String, bool> _watchedLocal;
+  late final Map<String, int> _watchedAtLocal;
 
   @override
   void initState() {
@@ -1737,6 +1761,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         '${ep.seasonNumber}_${ep.episodeNumber}': widget.watchedEpisodes
             .contains('${ep.seasonNumber}_${ep.episodeNumber}'),
     };
+    _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
   }
 
   Episode get _current => widget.episodes[_currentIndex];
@@ -1755,9 +1780,17 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'Ép. ${(offset + ep.episodeNumber).toString().padLeft(2, '0')}';
   }
 
+  String? _watchedDateLabel(String key) {
+    final millis = _watchedAtLocal[key];
+    if (millis == null || millis == 0) return null;
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final episode = _current;
+    final key = '${episode.seasonNumber}_${episode.episodeNumber}';
     final hasPrev = _currentIndex > 0;
     final hasNext = _currentIndex < widget.episodes.length - 1;
     final runtimeLabel = episode.runtime != null
@@ -1766,21 +1799,24 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final airDateLabel = episode.airDate?.isNotEmpty == true
         ? episode.airDate!
         : 'Inconnue';
+    final watchedLabel = _isWatched ? _watchedDateLabel(key) : null;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _episodeRef(episode),
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'toggle') {
                 final target = !_isWatched;
-                final key =
-                    '${_current.seasonNumber}_${_current.episodeNumber}';
-                setState(() => _watchedLocal[key] = target);
+                final nowMillis = DateTime.now().millisecondsSinceEpoch;
+                setState(() {
+                  _watchedLocal[key] = target;
+                  if (target) {
+                    _watchedAtLocal[key] = nowMillis;
+                  } else {
+                    _watchedAtLocal.remove(key);
+                  }
+                });
                 await widget.onToggleWatched(_current, target);
               }
             },
@@ -1857,9 +1893,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               Text(
                 '${_episodeRef(episode)}  ·  ${_globalEpLabel(episode)}',
                 textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
+                style: Theme.of(context).textTheme.titleMedium
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
@@ -1867,11 +1901,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 widget.seriesTitle,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withAlpha(153),
-                    ),
+                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -1888,6 +1919,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 children: [
                   Chip(label: Text('Date : $airDateLabel')),
                   Chip(label: Text('Durée : $runtimeLabel')),
+                  if (watchedLabel != null)
+                    Chip(
+                      avatar: const Icon(Icons.check_circle, size: 16),
+                      label: Text(watchedLabel),
+                    ),
                 ],
               ),
               const SizedBox(height: 16),

@@ -62,10 +62,12 @@ void main() {
 
   const defaultOffsets = {1: 0};
   const defaultSeriesTitle = 'Ma Série';
+  const emptyWatchedAt = <String, int>{};
 
   Widget buildPage({
     int initialIndex = 0,
     Set<String> watchedEpisodes = const {},
+    Map<String, int> episodeWatchedAt = emptyWatchedAt,
     bool Function(Episode)? isReleasedCheck,
     Future<void> Function(Episode, bool)? onToggleWatched,
     List<Episode>? episodeList,
@@ -77,6 +79,7 @@ void main() {
         episodes: episodeList ?? episodes,
         initialIndex: initialIndex,
         watchedEpisodes: watchedEpisodes,
+        episodeWatchedAt: episodeWatchedAt,
         seasonOffsets: seasonOffsets ?? defaultOffsets,
         seriesTitle: seriesTitle ?? defaultSeriesTitle,
         isReleasedCheck: isReleasedCheck ?? (ep) => ep.airDate != '2099-01-01',
@@ -85,9 +88,28 @@ void main() {
     );
   }
 
-  testWidgets('displays episode number in appbar title', (tester) async {
+  testWidgets('displays episode number below banner', (tester) async {
     await tester.pumpWidget(buildPage());
-    expect(find.text('S01 | E01'), findsOneWidget);
+    await tester.pumpAndSettle();
+    // AppBar has no title — episode ref is shown below the banner in the body
+    expect(find.textContaining('S01 | E01'), findsOneWidget);
+  });
+
+  testWidgets('shows watch date chip when episode is watched', (tester) async {
+    // 2025-03-15 00:00:00 UTC = 1741996800000 ms
+    final millis = DateTime(2025, 3, 15).millisecondsSinceEpoch;
+    await tester.pumpWidget(
+      buildPage(watchedEpisodes: {'1_1'}, episodeWatchedAt: {'1_1': millis}),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Vu le'), findsOneWidget);
+    expect(find.textContaining('15/03/2025'), findsOneWidget);
+  });
+
+  testWidgets('no watch date chip when episode is not watched', (tester) async {
+    await tester.pumpWidget(buildPage());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Vu le'), findsNothing);
   });
 
   testWidgets('displays series title on the page', (tester) async {
@@ -97,9 +119,7 @@ void main() {
   });
 
   testWidgets('displays global episode number', (tester) async {
-    await tester.pumpWidget(
-      buildPage(seasonOffsets: {1: 5}),
-    );
+    await tester.pumpWidget(buildPage(seasonOffsets: {1: 5}));
     await tester.pumpAndSettle();
     // global = offset(5) + episodeNumber(1) = 6 → "Ép. 06"
     expect(find.textContaining('Ép. 06'), findsOneWidget);
@@ -109,12 +129,12 @@ void main() {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();
 
-    expect(find.text('S01 | E01'), findsOneWidget);
+    expect(find.textContaining('S01 | E01'), findsOneWidget);
 
     await tester.tap(find.text('Suivant'));
     await tester.pumpAndSettle();
 
-    expect(find.text('S01 | E02'), findsOneWidget);
+    expect(find.textContaining('S01 | E02'), findsOneWidget);
   });
 
   testWidgets('navigates to previous episode via Précédent button', (
@@ -123,12 +143,12 @@ void main() {
     await tester.pumpWidget(buildPage(initialIndex: 1));
     await tester.pumpAndSettle();
 
-    expect(find.text('S01 | E02'), findsOneWidget);
+    expect(find.textContaining('S01 | E02'), findsOneWidget);
 
     await tester.tap(find.text('Précédent'));
     await tester.pumpAndSettle();
 
-    expect(find.text('S01 | E01'), findsOneWidget);
+    expect(find.textContaining('S01 | E01'), findsOneWidget);
   });
 
   testWidgets('cross-season navigation: next from last ep of S1 shows S2 E1', (
@@ -143,12 +163,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('S01 | E03'), findsOneWidget);
+    expect(find.textContaining('S01 | E03'), findsOneWidget);
 
     await tester.tap(find.text('Suivant'));
     await tester.pumpAndSettle();
 
-    expect(find.text('S02 | E01'), findsOneWidget);
+    expect(find.textContaining('S02 | E01'), findsOneWidget);
   });
 
   testWidgets('Précédent disabled on first episode', (tester) async {
@@ -241,6 +261,7 @@ void main() {
                     episodes: episodes,
                     initialIndex: 0,
                     watchedEpisodes: const {},
+                    episodeWatchedAt: const {},
                     seasonOffsets: defaultOffsets,
                     seriesTitle: defaultSeriesTitle,
                     isReleasedCheck: (_) => true,
