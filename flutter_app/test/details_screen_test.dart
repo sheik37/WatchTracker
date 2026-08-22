@@ -139,19 +139,19 @@ void main() {
     expect(find.textContaining('Ép. 06'), findsOneWidget);
   });
 
-  testWidgets('navigates to next episode via Suivant button', (tester) async {
+  testWidgets('navigates to next episode via arrow button', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('S01 | E01'), findsOneWidget);
 
-    await tester.tap(find.text('Suivant'));
+    await tester.tap(find.byTooltip('Épisode suivant'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('S01 | E02'), findsOneWidget);
   });
 
-  testWidgets('navigates to previous episode via Précédent button', (
+  testWidgets('navigates to previous episode via arrow button', (
     tester,
   ) async {
     await tester.pumpWidget(buildPage(initialIndex: 1));
@@ -159,7 +159,7 @@ void main() {
 
     expect(find.textContaining('S01 | E02'), findsOneWidget);
 
-    await tester.tap(find.text('Précédent'));
+    await tester.tap(find.byTooltip('Épisode précédent'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('S01 | E01'), findsOneWidget);
@@ -179,30 +179,36 @@ void main() {
 
     expect(find.textContaining('S01 | E03'), findsOneWidget);
 
-    await tester.tap(find.text('Suivant'));
+    await tester.tap(find.byTooltip('Épisode suivant'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('S02 | E01'), findsOneWidget);
   });
 
-  testWidgets('Précédent disabled on first episode', (tester) async {
+  testWidgets('flèche précédent désactivée sur le premier épisode', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();
 
-    final prevButton = tester.widget<TextButton>(
-      find.widgetWithText(TextButton, 'Précédent'),
+    final prevBtn = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byIcon(Icons.arrow_back_ios_rounded),
+        matching: find.byType(IconButton),
+      ),
     );
-    expect(prevButton.onPressed, isNull);
+    expect(prevBtn.onPressed, isNull);
   });
 
-  testWidgets('Suivant disabled on last episode', (tester) async {
+  testWidgets('flèche suivant désactivée sur le dernier épisode', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 2));
     await tester.pumpAndSettle();
 
-    final nextButton = tester.widget<TextButton>(
-      find.widgetWithText(TextButton, 'Suivant'),
+    final nextBtn = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byIcon(Icons.arrow_forward_ios_rounded),
+        matching: find.byType(IconButton),
+      ),
     );
-    expect(nextButton.onPressed, isNull);
+    expect(nextBtn.onPressed, isNull);
   });
 
   testWidgets('bouton affiche Marquer comme vu quand épisode non vu', (
@@ -326,7 +332,7 @@ void main() {
       expect(find.textContaining('10/06/2025'), findsOneWidget);
 
       // Navigate to previous episode (ep1, marked in the same batch)
-      await tester.tap(find.text('Précédent'));
+      await tester.tap(find.byTooltip('Épisode précédent'));
       await tester.pumpAndSettle();
 
       // Ep1 should also show the same date without leaving the page

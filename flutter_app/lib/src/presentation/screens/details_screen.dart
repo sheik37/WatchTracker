@@ -1904,11 +1904,29 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               ),
             ),
           const SizedBox(height: 12),
-          Text(
-            '${_episodeRef(ep)}  ·  ${_globalEpLabel(ep)}',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              IconButton(
+                onPressed: index > 0 ? () => _goTo(index - 1) : null,
+                icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+                tooltip: 'Épisode précédent',
+              ),
+              Expanded(
+                child: Text(
+                  '${_episodeRef(ep)}  ·  ${_globalEpLabel(ep)}',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(
+                onPressed: index < widget.episodes.length - 1
+                    ? () => _goTo(index + 1)
+                    : null,
+                icon: const Icon(Icons.arrow_forward_ios_rounded, size: 20),
+                tooltip: 'Épisode suivant',
+              ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
@@ -1972,9 +1990,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasPrev = _currentIndex > 0;
-    final hasNext = _currentIndex < widget.episodes.length - 1;
-
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -1991,31 +2006,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             ],
           ),
         ],
-      ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: hasPrev ? () => _goTo(_currentIndex - 1) : null,
-                  icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
-                  label: const Text('Précédent'),
-                ),
-              ),
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: hasNext ? () => _goTo(_currentIndex + 1) : null,
-                  iconAlignment: IconAlignment.end,
-                  icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
-                  label: const Text('Suivant'),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
       body: SafeArea(
         child: PageView.builder(
