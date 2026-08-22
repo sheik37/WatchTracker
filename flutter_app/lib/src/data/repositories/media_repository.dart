@@ -376,6 +376,7 @@ class MediaRepository {
             seasonNumber: (row['season_number'] as num).toInt(),
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
+            updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
