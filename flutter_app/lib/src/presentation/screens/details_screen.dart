@@ -7,6 +7,7 @@ import '../../data/models/backend_models.dart';
 import '../../data/models/details_models.dart';
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
+import '../theme/slide_up_route.dart';
 
 class DetailsScreen extends StatefulWidget {
   const DetailsScreen({
@@ -29,9 +30,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
   bool _loading = true;
   String? _error;
   Set<String> _watchedEpisodes = {};
+  Map<String, int> _episodeWatchedAt = {};
   int? _movieWatchedAtMillis;
   bool _showEpisodes = false;
   final ScrollController _scrollCtrl = ScrollController();
+  final Map<int, List<Episode>> _episodesBySeason = {};
 
   @override
   void initState() {
@@ -77,10 +80,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
           .where((p) => p.isWatched)
           .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
           .toSet();
+      final watchedAtMap = {
+        for (final p in progressList.where((p) => p.isWatched))
+          '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
+      };
       _details = details;
       _tracked = tracked;
       _status = status;
       _watchedEpisodes = watchedSet;
+      _episodeWatchedAt = watchedAtMap;
       _movieWatchedAtMillis =
           details.mediaType == MediaType.movie && status == WatchStatus.watched
           ? DateTime.now().millisecondsSinceEpoch
@@ -210,18 +218,30 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  Future<void> _setEpisodeWatched(Episode episode, bool watched) async {
+  Future<void> _setEpisodeWatched(
+    Episode episode,
+    bool watched,
+    int? updatedAtMillis,
+  ) async {
     final details = _details;
     if (details == null) return;
     final key = '${episode.seasonNumber}_${episode.episodeNumber}';
     final previous = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final next = <String>{..._watchedEpisodes};
+    final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final ts = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     if (watched) {
       next.add(key);
+      nextAt[key] = ts;
     } else {
       next.remove(key);
+      nextAt.remove(key);
     }
-    setState(() => _watchedEpisodes = next);
+    setState(() {
+      _watchedEpisodes = next;
+      _episodeWatchedAt = nextAt;
+    });
     _updateTvStatus(details);
     if (watched) {
       await _ensureTvTrackedForEpisodeUpdate(details);
@@ -232,10 +252,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
         seasonNumber: episode.seasonNumber,
         episodeNumber: episode.episodeNumber,
         isWatched: watched,
+        updatedAtMillis: watched ? ts : null,
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _watchedEpisodes = previous);
+      setState(() {
+        _watchedEpisodes = previous;
+        _episodeWatchedAt = previousAt;
+      });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour l\'épisode: $e')),
@@ -336,7 +360,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
     await _applyEpisodeUpdates(details, updates);
   }
 
-  Future<void> _markEpisodeUpTo(Episode targetEpisode) async {
+  Future<void> _markEpisodeUpTo(
+    Episode targetEpisode,
+    int? updatedAtMillis,
+  ) async {
     final details = _details;
     if (details == null) return;
     await _ensureTvTrackedForEpisodeUpdate(details);
@@ -351,6 +378,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         episodeCount: targetEpisode.episodeNumber,
       ),
     );
+    final ts = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final updates = <RemoteEpisodeProgress>[];
     for (final season in seasons.where(
       (s) => s.seasonNumber < targetEpisode.seasonNumber,
@@ -362,6 +390,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
             seasonNumber: season.seasonNumber,
             episodeNumber: i,
             isWatched: true,
+            updatedAtMillis: ts,
           ),
         );
       }
@@ -376,28 +405,39 @@ class _DetailsScreenState extends State<DetailsScreen> {
           seasonNumber: targetEpisode.seasonNumber,
           episodeNumber: i,
           isWatched: true,
+          updatedAtMillis: ts,
         ),
       );
     }
-    await _applyEpisodeUpdates(details, updates);
+    await _applyEpisodeUpdates(details, updates, ts);
   }
 
   Future<void> _applyEpisodeUpdates(
     MediaDetails details,
-    List<RemoteEpisodeProgress> updates,
-  ) async {
+    List<RemoteEpisodeProgress> updates, [
+    int? sharedTimestamp,
+  ]) async {
     if (updates.isEmpty) return;
     final previous = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final next = <String>{..._watchedEpisodes};
+    final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final nowFallback =
+        sharedTimestamp ?? DateTime.now().millisecondsSinceEpoch;
     for (final update in updates) {
       final key = '${update.seasonNumber}_${update.episodeNumber}';
       if (update.isWatched) {
         next.add(key);
+        nextAt[key] = update.updatedAtMillis ?? nowFallback;
       } else {
         next.remove(key);
+        nextAt.remove(key);
       }
     }
-    setState(() => _watchedEpisodes = next);
+    setState(() {
+      _watchedEpisodes = next;
+      _episodeWatchedAt = nextAt;
+    });
     _updateTvStatus(details);
     try {
       await widget.repository.updateEpisodeProgressBatch(
@@ -406,7 +446,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _watchedEpisodes = previous);
+      setState(() {
+        _watchedEpisodes = previous;
+        _episodeWatchedAt = previousAt;
+      });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour la saison: $e')),
@@ -505,6 +548,137 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
+  void _onSeasonEpisodesLoaded(int seasonNumber, List<Episode> episodes) {
+    _episodesBySeason[seasonNumber] = episodes;
+  }
+
+  Future<bool?> _showMarkUpToDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Épisodes précédents manquants'),
+        content: const Text(
+          'Des épisodes précédents ne sont pas cochés. Voulez-vous aussi les cocher ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Seulement celui-ci'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleEpisodeWithCheck(Episode episode, bool target) async {
+    final details = _details;
+    if (details == null) return;
+    if (episode.seasonNumber == 0) {
+      await _setEpisodeWatched(episode, target, null);
+      return;
+    }
+    if (!target) {
+      await _setEpisodeWatched(episode, false, null);
+      return;
+    }
+    final orderedSeasons = _orderedSeasons(details.seasons);
+    final offsets = _seasonOffsets(orderedSeasons);
+    final seasonOffset = offsets[episode.seasonNumber] ?? 0;
+    final expectedPreviousCount = seasonOffset + episode.episodeNumber - 1;
+
+    final watchedPositions =
+        _watchedEpisodes
+            .where((k) => !k.startsWith('0_'))
+            .map((k) {
+              final idx = k.indexOf('_');
+              if (idx <= 0 || idx >= k.length - 1) return null;
+              final s = int.tryParse(k.substring(0, idx));
+              final e = int.tryParse(k.substring(idx + 1));
+              if (s == null || e == null) return null;
+              return s * 10000 + e;
+            })
+            .whereType<int>()
+            .toList()
+          ..sort();
+
+    final currentKey = episode.seasonNumber * 10000 + episode.episodeNumber;
+    var watchedPrevious = 0;
+    for (final k in watchedPositions) {
+      if (k < currentKey) watchedPrevious++;
+    }
+
+    if (watchedPrevious < expectedPreviousCount) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final shouldMarkUpTo = await _showMarkUpToDialog();
+      if (!mounted || shouldMarkUpTo == null) return;
+      if (shouldMarkUpTo) {
+        await _markEpisodeUpTo(episode, now);
+      } else {
+        await _setEpisodeWatched(episode, true, now);
+      }
+      return;
+    }
+    await _setEpisodeWatched(episode, true, null);
+  }
+
+  Future<void> _openEpisodeDetailPage(Episode episode) async {
+    final details = _details;
+    if (details == null) return;
+    final orderedSeasons = _orderedSeasons(details.seasons);
+    final offsets = _seasonOffsets(orderedSeasons);
+
+    final allEpisodes = <Episode>[];
+    for (final season in orderedSeasons) {
+      final cached = _episodesBySeason[season.seasonNumber];
+      if (cached != null && cached.isNotEmpty) {
+        allEpisodes.addAll(cached);
+      } else if (season.episodes.isNotEmpty) {
+        _episodesBySeason[season.seasonNumber] = season.episodes;
+        allEpisodes.addAll(season.episodes);
+      } else {
+        try {
+          final fetched = await widget.repository.getSeasonEpisodes(
+            details.id,
+            season.seasonNumber,
+          );
+          _episodesBySeason[season.seasonNumber] = fetched;
+          allEpisodes.addAll(fetched);
+        } catch (_) {}
+      }
+    }
+
+    if (allEpisodes.isEmpty || !mounted) return;
+
+    final index = allEpisodes.indexWhere(
+      (e) =>
+          e.seasonNumber == episode.seasonNumber &&
+          e.episodeNumber == episode.episodeNumber,
+    );
+    if (index < 0) return;
+
+    await Navigator.of(context).push<void>(
+      SlideUpRoute(
+        builder: (ctx) => EpisodeDetailPage(
+          episodes: allEpisodes,
+          initialIndex: index,
+          watchedEpisodes: _watchedEpisodes,
+          episodeWatchedAt: _episodeWatchedAt,
+          seasonOffsets: offsets,
+          seriesTitle: details.title,
+          isReleasedCheck: _isReleasedEpisode,
+          onToggleWatched: _toggleEpisodeWithCheck,
+          getProgress: () =>
+              (watched: _watchedEpisodes, watchedAt: _episodeWatchedAt),
+        ),
+      ),
+    );
+  }
+
   Color? _progressColor() {
     return switch (_status) {
       WatchStatus.inProgress => const Color(0xFFFFC107),
@@ -592,6 +766,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   onMarkSeasonWatched: _markSeasonWatched,
                   onMarkOnlySeasonWatched: _markOnlySeasonWatched,
                   onMarkEpisodeUpTo: _markEpisodeUpTo,
+                  onOpenEpisode: _openEpisodeDetailPage,
+                  onEpisodesLoaded: _onSeasonEpisodesLoaded,
                 );
               }, childCount: orderedSeasons.length),
             )
@@ -1108,6 +1284,8 @@ class _SeasonSection extends StatefulWidget {
     required this.onMarkSeasonWatched,
     required this.onMarkOnlySeasonWatched,
     required this.onMarkEpisodeUpTo,
+    required this.onOpenEpisode,
+    required this.onEpisodesLoaded,
   });
 
   final int mediaId;
@@ -1116,10 +1294,13 @@ class _SeasonSection extends StatefulWidget {
   final Season season;
   final int seasonOffset;
   final Set<String> watchedEpisodes;
-  final Future<void> Function(Episode, bool) onToggleEpisode;
+  final Future<void> Function(Episode, bool, int?) onToggleEpisode;
   final Future<void> Function(Season, bool) onMarkSeasonWatched;
   final Future<void> Function(Season, bool) onMarkOnlySeasonWatched;
-  final Future<void> Function(Episode) onMarkEpisodeUpTo;
+  final Future<void> Function(Episode, int?) onMarkEpisodeUpTo;
+  final Future<void> Function(Episode) onOpenEpisode;
+  final void Function(int seasonNumber, List<Episode> episodes)
+  onEpisodesLoaded;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -1175,6 +1356,10 @@ class _SeasonSectionState extends State<_SeasonSection> {
     if (_episodes.isNotEmpty || widget.season.episodeCount <= 0) return;
     if (widget.season.episodes.isNotEmpty) {
       setState(() => _episodes = widget.season.episodes);
+      widget.onEpisodesLoaded(
+        widget.season.seasonNumber,
+        widget.season.episodes,
+      );
       return;
     }
     setState(() => _loadingEpisodes = true);
@@ -1185,6 +1370,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
       );
       if (!mounted) return;
       setState(() => _episodes = fetched);
+      widget.onEpisodesLoaded(widget.season.seasonNumber, fetched);
     } finally {
       if (mounted) {
         setState(() => _loadingEpisodes = false);
@@ -1194,11 +1380,11 @@ class _SeasonSectionState extends State<_SeasonSection> {
 
   Future<void> _onEpisodeCheckRequest(Episode episode, bool target) async {
     if (_isSpecialSeason) {
-      await widget.onToggleEpisode(episode, target);
+      await widget.onToggleEpisode(episode, target, null);
       return;
     }
     if (!target) {
-      await widget.onToggleEpisode(episode, false);
+      await widget.onToggleEpisode(episode, false, null);
       return;
     }
     final watchedPositions =
@@ -1216,16 +1402,17 @@ class _SeasonSectionState extends State<_SeasonSection> {
       current,
     );
     if (watchedPrevious < _expectedPreviousCount(episode)) {
+      final now = DateTime.now().millisecondsSinceEpoch;
       final shouldMarkUpTo = await _showMarkPreviousEpisodesDialog();
       if (!mounted || shouldMarkUpTo == null) return;
       if (shouldMarkUpTo) {
-        await widget.onMarkEpisodeUpTo(episode);
+        await widget.onMarkEpisodeUpTo(episode, now);
       } else {
-        await widget.onToggleEpisode(episode, true);
+        await widget.onToggleEpisode(episode, true, now);
       }
       return;
     }
-    await widget.onToggleEpisode(episode, true);
+    await widget.onToggleEpisode(episode, true, null);
   }
 
   Future<bool?> _showMarkPreviousEpisodesDialog() {
@@ -1271,32 +1458,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
           ),
         ],
       ),
-    );
-  }
-
-  Future<void> _openEpisodeDialog(Episode episode) async {
-    var dialogChecked = _isWatched(episode);
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return _EpisodeDialog(
-              episode: episode,
-              checked: dialogChecked,
-              onDismiss: () => Navigator.of(dialogContext).pop(),
-              onCheckedChange: (target) async {
-                setDialogState(() => dialogChecked = target);
-                await _onEpisodeCheckRequest(episode, target);
-                if (!mounted) return;
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).pop();
-                }
-              },
-            );
-          },
-        );
-      },
     );
   }
 
@@ -1493,7 +1654,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                 .surfaceContainerHighest
                                 .withValues(alpha: 0.35),
                             child: ListTile(
-                              onTap: () => _openEpisodeDialog(ep),
+                              onTap: () => widget.onOpenEpisode(ep),
                               leading: SizedBox(
                                 width: 72,
                                 height: 72,
@@ -1590,60 +1751,476 @@ class _EpisodeReleaseStatus extends StatelessWidget {
   }
 }
 
-class _EpisodeDialog extends StatelessWidget {
-  const _EpisodeDialog({
-    required this.episode,
-    required this.checked,
-    required this.onDismiss,
-    required this.onCheckedChange,
+class EpisodeDetailPage extends StatefulWidget {
+  const EpisodeDetailPage({
+    super.key,
+    required this.episodes,
+    required this.initialIndex,
+    required this.watchedEpisodes,
+    required this.episodeWatchedAt,
+    required this.seasonOffsets,
+    required this.seriesTitle,
+    required this.isReleasedCheck,
+    required this.onToggleWatched,
+    required this.getProgress,
   });
 
-  final Episode episode;
-  final bool checked;
-  final VoidCallback onDismiss;
-  final ValueChanged<bool> onCheckedChange;
+  final List<Episode> episodes;
+  final int initialIndex;
+  final Set<String> watchedEpisodes;
+  final Map<String, int> episodeWatchedAt;
+  final Map<int, int> seasonOffsets;
+  final String seriesTitle;
+  final bool Function(Episode) isReleasedCheck;
+  final Future<void> Function(Episode, bool) onToggleWatched;
+
+  /// Returns the current (watched, watchedAt) from the parent after a toggle.
+  final ({Set<String> watched, Map<String, int> watchedAt}) Function()
+  getProgress;
+
+  @override
+  State<EpisodeDetailPage> createState() => _EpisodeDetailPageState();
+}
+
+class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
+  late int _currentIndex;
+  late PageController _pageController;
+  late Map<String, bool> _watchedLocal;
+  late Map<String, int> _watchedAtLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    _watchedLocal = {
+      for (final ep in widget.episodes)
+        '${ep.seasonNumber}_${ep.episodeNumber}': widget.watchedEpisodes
+            .contains('${ep.seasonNumber}_${ep.episodeNumber}'),
+    };
+    _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _syncFromProgress() {
+    final progress = widget.getProgress();
+    for (final ep in widget.episodes) {
+      final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+      _watchedLocal[k] = progress.watched.contains(k);
+    }
+    _watchedAtLocal
+      ..clear()
+      ..addAll(progress.watchedAt);
+  }
+
+  void _goTo(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  Future<void> _toggleEpisode(Episode ep) async {
+    final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final target = !(_watchedLocal[k] ?? false);
+    final nowMillis = DateTime.now().millisecondsSinceEpoch;
+    setState(() {
+      _watchedLocal[k] = target;
+      if (target) {
+        _watchedAtLocal[k] = nowMillis;
+      } else {
+        _watchedAtLocal.remove(k);
+      }
+    });
+    await widget.onToggleWatched(ep, target);
+    if (mounted) setState(_syncFromProgress);
+  }
+
+  Episode get _current => widget.episodes[_currentIndex];
+
+  bool get _isWatched =>
+      _watchedLocal['${_current.seasonNumber}_${_current.episodeNumber}'] ??
+      false;
+
+  bool get _isReleased => widget.isReleasedCheck(_current);
+
+  String _episodeRef(Episode ep) =>
+      'S${ep.seasonNumber.toString().padLeft(2, '0')} | E${ep.episodeNumber.toString().padLeft(2, '0')}';
+
+  String _globalEpLabel(Episode ep) {
+    final offset = widget.seasonOffsets[ep.seasonNumber] ?? 0;
+    return 'Ép. ${(offset + ep.episodeNumber).toString().padLeft(2, '0')}';
+  }
+
+  String? _watchedDateLabel(String key) {
+    final millis = _watchedAtLocal[key];
+    if (millis == null || millis == 0) return null;
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  }
+
+  void _showSeasonSheet(BuildContext context) {
+    // Liste ordonnée des numéros de saison (même ordre que _orderedSeasons)
+    final seasonNumbers = widget.seasonOffsets.keys.toList()
+      ..sort((a, b) {
+        if (a == 0) return 1;
+        if (b == 0) return -1;
+        return a.compareTo(b);
+      });
+
+    showModalBottomSheet<void>(
+      context: context,
+      constraints: const BoxConstraints(maxWidth: 320),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => _SeasonSheetContent(
+        seasonNumbers: seasonNumbers,
+        initialSeason: _current.seasonNumber,
+        currentEpisode: _current,
+        episodes: widget.episodes,
+        watchedLocal: _watchedLocal,
+        onEpisodeTap: (ep) {
+          Navigator.pop(sheetCtx);
+          final targetIndex = widget.episodes.indexOf(ep);
+          if (targetIndex >= 0) _goTo(targetIndex);
+        },
+      ),
+    );
+  }
+
+  Widget _buildEpisodeContent(BuildContext context, int index) {
+    final ep = widget.episodes[index];
+    final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final isWatched = _watchedLocal[k] ?? false;
+    final isReleased = widget.isReleasedCheck(ep);
+    final watchedLabel = isWatched ? _watchedDateLabel(k) : null;
+    final runtimeLabel = ep.runtime != null ? '${ep.runtime} min' : 'Inconnue';
+    final airDateLabel = ep.airDate?.isNotEmpty == true
+        ? ep.airDate!
+        : 'Inconnue';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            ep.name,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: isWatched
+                ? OutlinedButton.icon(
+                    onPressed: () => _toggleEpisode(ep),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    label: const Text('Marquer non vu'),
+                  )
+                : FilledButton.icon(
+                    onPressed: isReleased ? () => _toggleEpisode(ep) : null,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Marquer comme vu'),
+                  ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(label: Text('Date : $airDateLabel')),
+              Chip(label: Text('Durée : $runtimeLabel')),
+              if (isWatched)
+                Chip(
+                  avatar: const Icon(Icons.check_circle, size: 16),
+                  label: Text(watchedLabel ?? 'Vu'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Synopsis',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            ep.overview.isEmpty ? 'Aucun synopsis disponible.' : ep.overview,
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    final current = _current;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.seriesTitle),
+        centerTitle: true,
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'toggle') await _toggleEpisode(_current);
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'toggle',
+                enabled: _isReleased,
+                child: Text(_isWatched ? 'Marquer non vu' : 'Marquer comme vu'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              episode.name,
-              style: Theme.of(context).textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Titre : ${episode.name}'),
-            Text('Date de parution : ${episode.airDate ?? 'Inconnue'}'),
-            Text(
-              'Durée : ${episode.runtime != null ? '${episode.runtime} min' : 'Inconnue'}',
-            ),
-            const SizedBox(height: 8),
-            Text(
-              episode.overview.isEmpty
-                  ? 'Aucun synopsis disponible.'
-                  : episode.overview,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: current.stillPath != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: CachedNetworkImage(
+                        imageUrl: current.stillPath!,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Container(
+                      height: 220,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.image_not_supported_rounded,
+                          size: 42,
+                        ),
+                      ),
+                    ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Checkbox(
-                  value: checked,
-                  onChanged: (target) => onCheckedChange(target ?? false),
-                ),
-                const Text('Vu'),
-                const Spacer(),
-                TextButton(onPressed: onDismiss, child: const Text('Fermer')),
-              ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _currentIndex > 0
+                        ? () => _goTo(_currentIndex - 1)
+                        : null,
+                    icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+                    tooltip: 'Épisode précédent',
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _showSeasonSheet(context),
+                      onHorizontalDragEnd: (details) {
+                        final velocity = details.primaryVelocity ?? 0;
+                        if (velocity < -200 &&
+                            _currentIndex < widget.episodes.length - 1) {
+                          _goTo(_currentIndex + 1);
+                        } else if (velocity > 200 && _currentIndex > 0) {
+                          _goTo(_currentIndex - 1);
+                        }
+                      },
+                      child: Text(
+                        '${_episodeRef(current)}  ·  ${_globalEpLabel(current)}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _currentIndex < widget.episodes.length - 1
+                        ? () => _goTo(_currentIndex + 1)
+                        : null,
+                    icon: const Icon(Icons.arrow_forward_ios_rounded, size: 20),
+                    tooltip: 'Épisode suivant',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: widget.episodes.length,
+                physics: const NeverScrollableScrollPhysics(),
+                onPageChanged: (index) => setState(() => _currentIndex = index),
+                itemBuilder: _buildEpisodeContent,
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SeasonSheetContent extends StatefulWidget {
+  const _SeasonSheetContent({
+    required this.seasonNumbers,
+    required this.initialSeason,
+    required this.currentEpisode,
+    required this.episodes,
+    required this.watchedLocal,
+    required this.onEpisodeTap,
+  });
+
+  final List<int> seasonNumbers;
+  final int initialSeason;
+  final Episode currentEpisode;
+  final List<Episode> episodes;
+  final Map<String, bool> watchedLocal;
+  final void Function(Episode) onEpisodeTap;
+
+  @override
+  State<_SeasonSheetContent> createState() => _SeasonSheetContentState();
+}
+
+class _SeasonSheetContentState extends State<_SeasonSheetContent> {
+  late int _shownSeason;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownSeason = widget.initialSeason;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seasonIdx = widget.seasonNumbers.indexOf(_shownSeason);
+    final hasPrev = seasonIdx > 0;
+    final hasNext = seasonIdx < widget.seasonNumbers.length - 1;
+    final seasonEpisodes = widget.episodes
+        .where((ep) => ep.seasonNumber == _shownSeason)
+        .toList();
+    final seasonLabel = _shownSeason == 0 ? 'Spéciaux' : 'Saison $_shownSeason';
+    final watchedCount = seasonEpisodes
+        .where(
+          (ep) =>
+              widget.watchedLocal['${ep.seasonNumber}_${ep.episodeNumber}'] ??
+              false,
+        )
+        .length;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 8),
+        Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade400,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: hasPrev
+                    ? () => setState(
+                        () =>
+                            _shownSeason = widget.seasonNumbers[seasonIdx - 1],
+                      )
+                    : null,
+                icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      seasonLabel,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '$watchedCount / ${seasonEpisodes.length} vus',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: hasNext
+                    ? () => setState(
+                        () =>
+                            _shownSeason = widget.seasonNumbers[seasonIdx + 1],
+                      )
+                    : null,
+                icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
+              ),
+            ],
+          ),
+        ),
+        Flexible(
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: seasonEpisodes.length,
+            itemBuilder: (_, i) {
+              final ep = seasonEpisodes[i];
+              final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+              final isWatched = widget.watchedLocal[k] ?? false;
+              final isCurrentEp =
+                  ep.seasonNumber == widget.currentEpisode.seasonNumber &&
+                  ep.episodeNumber == widget.currentEpisode.episodeNumber;
+              return ListTile(
+                dense: true,
+                selected: isCurrentEp,
+                title: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      isWatched
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      color: isWatched ? Colors.green : Colors.grey,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'E${ep.episodeNumber.toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        fontWeight: isCurrentEp
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+                onTap: () => widget.onEpisodeTap(ep),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 }

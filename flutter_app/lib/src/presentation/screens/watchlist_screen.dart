@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
+import '../theme/slide_up_route.dart';
 import '../widgets/media_card.dart';
 import 'details_screen.dart';
 
@@ -133,7 +134,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
 
   Future<void> _openDetails(WatchlistItem item) async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      SlideUpRoute<void>(
         builder: (_) =>
             DetailsScreen(repository: widget.repository, media: item.media),
       ),

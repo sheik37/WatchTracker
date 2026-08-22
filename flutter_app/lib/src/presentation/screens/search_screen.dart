@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/details_models.dart';
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
+import '../theme/slide_up_route.dart';
 import '../widgets/media_card.dart';
 import 'details_screen.dart';
 
@@ -351,7 +352,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _openDetails(Media media) async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      SlideUpRoute<void>(
         builder: (_) =>
             DetailsScreen(repository: widget.repository, media: media),
       ),

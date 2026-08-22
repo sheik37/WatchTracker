@@ -376,6 +376,7 @@ class MediaRepository {
             seasonNumber: (row['season_number'] as num).toInt(),
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
+            updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
@@ -386,12 +387,14 @@ class MediaRepository {
     required int seasonNumber,
     required int episodeNumber,
     required bool isWatched,
+    int? updatedAtMillis,
   }) async {
     await _database.upsertEpisodeProgress(
       mediaId: mediaId,
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
       isWatched: isWatched,
+      updatedAtMillis: updatedAtMillis,
     );
     final backend = _backendApi;
     if (backend != null) {
