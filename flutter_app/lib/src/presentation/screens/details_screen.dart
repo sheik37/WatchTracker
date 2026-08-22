@@ -1783,6 +1783,7 @@ class EpisodeDetailPage extends StatefulWidget {
 
 class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   late int _currentIndex;
+  late PageController _pageController;
   late Map<String, bool> _watchedLocal;
   late Map<String, int> _watchedAtLocal;
 
@@ -1790,12 +1791,19 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
     _watchedLocal = {
       for (final ep in widget.episodes)
         '${ep.seasonNumber}_${ep.episodeNumber}': widget.watchedEpisodes
             .contains('${ep.seasonNumber}_${ep.episodeNumber}'),
     };
     _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   void _syncFromProgress() {
@@ -1807,6 +1815,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     _watchedAtLocal
       ..clear()
       ..addAll(progress.watchedAt);
+  }
+
+  void _goTo(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   Episode get _current => widget.episodes[_currentIndex];
@@ -1832,19 +1848,101 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 
+  Widget _buildEpisodeContent(BuildContext context, int index) {
+    final ep = widget.episodes[index];
+    final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final isWatched = _watchedLocal[k] ?? false;
+    final watchedLabel = isWatched ? _watchedDateLabel(k) : null;
+    final runtimeLabel = ep.runtime != null ? '${ep.runtime} min' : 'Inconnue';
+    final airDateLabel = ep.airDate?.isNotEmpty == true
+        ? ep.airDate!
+        : 'Inconnue';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (ep.stillPath != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: CachedNetworkImage(
+                imageUrl: ep.stillPath!,
+                height: 220,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            )
+          else
+            Container(
+              height: 220,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Center(
+                child: Icon(Icons.image_not_supported_rounded, size: 42),
+              ),
+            ),
+          const SizedBox(height: 12),
+          Text(
+            '${_episodeRef(ep)}  ·  ${_globalEpLabel(ep)}',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            widget.seriesTitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            ep.name,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(label: Text('Date : $airDateLabel')),
+              Chip(label: Text('Durée : $runtimeLabel')),
+              if (watchedLabel != null)
+                Chip(
+                  avatar: const Icon(Icons.check_circle, size: 16),
+                  label: Text(watchedLabel),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Synopsis',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            ep.overview.isEmpty ? 'Aucun synopsis disponible.' : ep.overview,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final episode = _current;
     final key = '${episode.seasonNumber}_${episode.episodeNumber}';
     final hasPrev = _currentIndex > 0;
     final hasNext = _currentIndex < widget.episodes.length - 1;
-    final runtimeLabel = episode.runtime != null
-        ? '${episode.runtime} min'
-        : 'Inconnue';
-    final airDateLabel = episode.airDate?.isNotEmpty == true
-        ? episode.airDate!
-        : 'Inconnue';
-    final watchedLabel = _isWatched ? _watchedDateLabel(key) : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -1884,18 +1982,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             children: [
               Expanded(
                 child: TextButton.icon(
-                  onPressed: hasPrev
-                      ? () => setState(() => _currentIndex--)
-                      : null,
+                  onPressed: hasPrev ? () => _goTo(_currentIndex - 1) : null,
                   icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
                   label: const Text('Précédent'),
                 ),
               ),
               Expanded(
                 child: TextButton.icon(
-                  onPressed: hasNext
-                      ? () => setState(() => _currentIndex++)
-                      : null,
+                  onPressed: hasNext ? () => _goTo(_currentIndex + 1) : null,
                   iconAlignment: IconAlignment.end,
                   icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
                   label: const Text('Suivant'),
@@ -1906,86 +2000,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (episode.stillPath != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: CachedNetworkImage(
-                    imageUrl: episode.stillPath!,
-                    height: 220,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                  ),
-                )
-              else
-                Container(
-                  height: 220,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.image_not_supported_rounded, size: 42),
-                  ),
-                ),
-              const SizedBox(height: 12),
-              Text(
-                '${_episodeRef(episode)}  ·  ${_globalEpLabel(episode)}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.seriesTitle,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                episode.name,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  Chip(label: Text('Date : $airDateLabel')),
-                  Chip(label: Text('Durée : $runtimeLabel')),
-                  if (watchedLabel != null)
-                    Chip(
-                      avatar: const Icon(Icons.check_circle, size: 16),
-                      label: Text(watchedLabel),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Synopsis',
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                episode.overview.isEmpty
-                    ? 'Aucun synopsis disponible.'
-                    : episode.overview,
-              ),
-            ],
-          ),
+        child: PageView.builder(
+          controller: _pageController,
+          itemCount: widget.episodes.length,
+          onPageChanged: (index) => setState(() => _currentIndex = index),
+          itemBuilder: _buildEpisodeContent,
         ),
       ),
     );
