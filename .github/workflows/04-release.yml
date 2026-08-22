@@ -82,11 +82,17 @@ jobs:
             mkdir -p flutter_app/android/keystore
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > flutter_app/android/keystore/watchtracker-release.keystore
 
-            if ! keytool -list -keystore flutter_app/android/keystore/watchtracker-release.keystore \
+            if ! keytool -list \
+              -keystore flutter_app/android/keystore/watchtracker-release.keystore \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+              echo "::error::Android signing secrets invalid: ANDROID_KEYSTORE_PASSWORD incorrect ou keystore corrompu."
+              exit 1
+            fi
+            if ! keytool -list \
+              -keystore flutter_app/android/keystore/watchtracker-release.keystore \
               -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -alias "$ANDROID_KEY_ALIAS" \
-              -keypass "$ANDROID_KEY_PASSWORD" >/dev/null 2>&1; then
-              echo "::error::Android signing secrets invalid: keystore password, alias or key password is incorrect."
+              -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+              echo "::error::Android signing secrets invalid: ANDROID_KEY_ALIAS '${ANDROID_KEY_ALIAS}' introuvable dans le keystore."
               exit 1
             fi
 
