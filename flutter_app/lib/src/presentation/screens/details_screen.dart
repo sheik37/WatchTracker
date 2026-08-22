@@ -1880,10 +1880,16 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (sheetCtx) => _SeasonSheetContent(
+      builder: (sheetCtx) => DraggableScrollableSheet(
+        initialChildSize: 1.0,
+        minChildSize: 0.4,
+        maxChildSize: 1.0,
+        expand: false,
+        builder: (_, __) => _SeasonSheetContent(
         seasonNumbers: seasonNumbers,
         initialSeason: _current.seasonNumber,
         currentEpisode: _current,
@@ -1894,6 +1900,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           final targetIndex = widget.episodes.indexOf(ep);
           if (targetIndex >= 0) _goTo(targetIndex);
         },
+        ),
       ),
     );
   }
@@ -2169,19 +2176,25 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
               return ListTile(
                 dense: true,
                 selected: isCurrentEp,
-                leading: Icon(
-                  isWatched
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                  color: isWatched ? Colors.green : Colors.grey,
-                  size: 20,
-                ),
-                title: Text(
-                  'E${ep.episodeNumber.toString().padLeft(2, '0')}',
-                  style: TextStyle(
-                    fontWeight:
-                        isCurrentEp ? FontWeight.bold : FontWeight.normal,
-                  ),
+                title: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      isWatched
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      color: isWatched ? Colors.green : Colors.grey,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'E${ep.episodeNumber.toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        fontWeight:
+                            isCurrentEp ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ],
                 ),
                 onTap: () => widget.onEpisodeTap(ep),
               );
