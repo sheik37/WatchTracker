@@ -76,9 +76,20 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          rm -f flutter_app/android/key.properties flutter_app/android/keystore/watchtracker-release.keystore
+
           if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
             mkdir -p flutter_app/android/keystore
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > flutter_app/android/keystore/watchtracker-release.keystore
+
+            if ! keytool -list -keystore flutter_app/android/keystore/watchtracker-release.keystore \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -alias "$ANDROID_KEY_ALIAS" \
+              -keypass "$ANDROID_KEY_PASSWORD" >/dev/null 2>&1; then
+              echo "::error::Android signing secrets invalid: keystore password, alias or key password is incorrect."
+              exit 1
+            fi
+
             {
               echo "storeFile=../android/keystore/watchtracker-release.keystore"
               echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
