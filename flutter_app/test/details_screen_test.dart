@@ -73,6 +73,7 @@ void main() {
     List<Episode>? episodeList,
     Map<int, int>? seasonOffsets,
     String? seriesTitle,
+    ({Set<String> watched, Map<String, int> watchedAt}) Function()? getProgress,
   }) {
     return MaterialApp(
       home: EpisodeDetailPage(
@@ -84,6 +85,9 @@ void main() {
         seriesTitle: seriesTitle ?? defaultSeriesTitle,
         isReleasedCheck: isReleasedCheck ?? (ep) => ep.airDate != '2099-01-01',
         onToggleWatched: onToggleWatched ?? (_, __) async {},
+        getProgress:
+            getProgress ??
+            () => (watched: watchedEpisodes, watchedAt: episodeWatchedAt),
       ),
     );
   }
@@ -266,6 +270,7 @@ void main() {
                     seriesTitle: defaultSeriesTitle,
                     isReleasedCheck: (_) => true,
                     onToggleWatched: (_, __) async {},
+                    getProgress: () => (watched: const {}, watchedAt: const {}),
                   ),
                 ),
               ),
@@ -286,36 +291,46 @@ void main() {
   });
 
   testWidgets(
-    'watch date appears on previous episode after parent updates episodeWatchedAt',
+    'watch date appears on previous episode after getProgress is called',
     (tester) async {
       final millis = DateTime(2025, 6, 10).millisecondsSinceEpoch;
+      // Mutable state simulating the parent
+      var watched = <String>{};
+      var watchedAt = <String, int>{};
 
-      // Start: episode 2 is open, neither episode is watched
-      await tester.pumpWidget(buildPage(initialIndex: 1));
+      await tester.pumpWidget(
+        buildPage(
+          initialIndex: 1,
+          watchedEpisodes: watched,
+          episodeWatchedAt: watchedAt,
+          getProgress: () => (watched: watched, watchedAt: watchedAt),
+          onToggleWatched: (ep, target) async {
+            // Simulate parent marking ep2 AND ep1 (batch)
+            watched = {'1_1', '1_2'};
+            watchedAt = {'1_1': millis, '1_2': millis};
+          },
+        ),
+      );
       await tester.pumpAndSettle();
 
       // No watch date chip yet
       expect(find.textContaining('Vu le'), findsNothing);
 
-      // Simulate parent marking both ep1 and ep2 watched with the same timestamp
-      await tester.pumpWidget(
-        buildPage(
-          initialIndex: 1,
-          watchedEpisodes: {'1_1', '1_2'},
-          episodeWatchedAt: {'1_1': millis, '1_2': millis},
-        ),
-      );
+      // Trigger toggle on ep2 (current)
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Marquer comme vu'));
       await tester.pumpAndSettle();
 
       // Ep2 is current — should show the date
       expect(find.textContaining('Vu le'), findsOneWidget);
       expect(find.textContaining('10/06/2025'), findsOneWidget);
 
-      // Navigate to previous episode (ep1, which was also marked in the batch)
+      // Navigate to previous episode (ep1, marked in the same batch)
       await tester.tap(find.text('Précédent'));
       await tester.pumpAndSettle();
 
-      // Ep1 should also show the same date without needing to leave the page
+      // Ep1 should also show the same date without leaving the page
       expect(find.textContaining('Vu le'), findsOneWidget);
       expect(find.textContaining('10/06/2025'), findsOneWidget);
     },

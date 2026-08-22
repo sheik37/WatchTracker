@@ -671,6 +671,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
           seriesTitle: details.title,
           isReleasedCheck: _isReleasedEpisode,
           onToggleWatched: _toggleEpisodeWithCheck,
+          getProgress: () =>
+              (watched: _watchedEpisodes, watchedAt: _episodeWatchedAt),
         ),
       ),
     );
@@ -1759,6 +1761,7 @@ class EpisodeDetailPage extends StatefulWidget {
     required this.seriesTitle,
     required this.isReleasedCheck,
     required this.onToggleWatched,
+    required this.getProgress,
   });
 
   final List<Episode> episodes;
@@ -1770,14 +1773,18 @@ class EpisodeDetailPage extends StatefulWidget {
   final bool Function(Episode) isReleasedCheck;
   final Future<void> Function(Episode, bool) onToggleWatched;
 
+  /// Returns the current (watched, watchedAt) from the parent after a toggle.
+  final ({Set<String> watched, Map<String, int> watchedAt}) Function()
+  getProgress;
+
   @override
   State<EpisodeDetailPage> createState() => _EpisodeDetailPageState();
 }
 
 class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   late int _currentIndex;
-  late final Map<String, bool> _watchedLocal;
-  late final Map<String, int> _watchedAtLocal;
+  late Map<String, bool> _watchedLocal;
+  late Map<String, int> _watchedAtLocal;
 
   @override
   void initState() {
@@ -1791,33 +1798,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
   }
 
-  @override
-  void didUpdateWidget(EpisodeDetailPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Merge in any new watched states/timestamps from the parent (e.g. after
-    // a "mark previous episodes" batch) without overwriting local toggles that
-    // have not yet been confirmed by the parent.
-    for (final entry in widget.watchedEpisodes) {
-      if (!(_watchedLocal[entry] ?? false)) {
-        _watchedLocal[entry] = true;
-      }
+  void _syncFromProgress() {
+    final progress = widget.getProgress();
+    for (final ep in widget.episodes) {
+      final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+      _watchedLocal[k] = progress.watched.contains(k);
     }
-    for (final key in (_watchedLocal.keys.toList())) {
-      if (!widget.watchedEpisodes.contains(key)) {
-        _watchedLocal[key] = false;
-      }
-    }
-    for (final entry in widget.episodeWatchedAt.entries) {
-      _watchedAtLocal.putIfAbsent(entry.key, () => entry.value);
-      if ((_watchedAtLocal[entry.key] ?? 0) < entry.value) {
-        _watchedAtLocal[entry.key] = entry.value;
-      }
-    }
-    for (final key in (_watchedAtLocal.keys.toList())) {
-      if (!widget.watchedEpisodes.contains(key)) {
-        _watchedAtLocal.remove(key);
-      }
-    }
+    _watchedAtLocal
+      ..clear()
+      ..addAll(progress.watchedAt);
   }
 
   Episode get _current => widget.episodes[_currentIndex];
@@ -1874,6 +1863,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                   }
                 });
                 await widget.onToggleWatched(_current, target);
+                if (mounted) setState(_syncFromProgress);
               }
             },
             itemBuilder: (context) => [
