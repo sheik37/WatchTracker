@@ -153,6 +153,31 @@ void main() {
     expect(find.text('E03'), findsOneWidget);
   });
 
+  testWidgets('bottom sheet permet de naviguer entre saisons', (tester) async {
+    await tester.pumpWidget(
+      buildPage(
+        episodeList: crossSeasonEpisodes,
+        initialIndex: 0,
+        seasonOffsets: {1: 0, 2: 1},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Ouvre la bottom sheet sur S1
+    await tester.tap(find.textContaining('S01 | E03'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saison 1'), findsOneWidget);
+    expect(find.text('E03'), findsOneWidget);
+
+    // Avance à la saison 2
+    await tester.tap(find.byIcon(Icons.arrow_forward_ios_rounded).last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saison 2'), findsOneWidget);
+    expect(find.text('E01'), findsOneWidget);
+  });
+
   testWidgets('navigates to next episode via arrow button', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();

@@ -1870,78 +1870,31 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       .toList();
 
   void _showSeasonSheet(BuildContext context) {
+    // Liste ordonnée des numéros de saison (même ordre que _orderedSeasons)
+    final seasonNumbers = widget.seasonOffsets.keys.toList()
+      ..sort((a, b) {
+        if (a == 0) return 1;
+        if (b == 0) return -1;
+        return a.compareTo(b);
+      });
+
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (sheetCtx, setSheetState) {
-            final episodes = _currentSeasonEpisodes;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade400,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    'Saison ${_current.seasonNumber}',
-                    style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: episodes.length,
-                    itemBuilder: (_, i) {
-                      final ep = episodes[i];
-                      final k = '${ep.seasonNumber}_${ep.episodeNumber}';
-                      final isWatched = _watchedLocal[k] ?? false;
-                      final isCurrentEp = ep.seasonNumber == _current.seasonNumber &&
-                          ep.episodeNumber == _current.episodeNumber;
-                      return ListTile(
-                        dense: true,
-                        selected: isCurrentEp,
-                        leading: Icon(
-                          isWatched
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: isWatched ? Colors.green : Colors.grey,
-                          size: 20,
-                        ),
-                        title: Text(
-                          'E${ep.episodeNumber.toString().padLeft(2, '0')}',
-                          style: TextStyle(
-                            fontWeight: isCurrentEp
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.pop(sheetCtx);
-                          final targetIndex = widget.episodes.indexOf(ep);
-                          if (targetIndex >= 0) _goTo(targetIndex);
-                        },
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            );
-          },
-        );
-      },
+      builder: (sheetCtx) => _SeasonSheetContent(
+        seasonNumbers: seasonNumbers,
+        initialSeason: _current.seasonNumber,
+        currentEpisode: _current,
+        episodes: widget.episodes,
+        watchedLocal: _watchedLocal,
+        onEpisodeTap: (ep) {
+          Navigator.pop(sheetCtx);
+          final targetIndex = widget.episodes.indexOf(ep);
+          if (targetIndex >= 0) _goTo(targetIndex);
+        },
+      ),
     );
   }
 
@@ -2117,6 +2070,126 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SeasonSheetContent extends StatefulWidget {
+  const _SeasonSheetContent({
+    required this.seasonNumbers,
+    required this.initialSeason,
+    required this.currentEpisode,
+    required this.episodes,
+    required this.watchedLocal,
+    required this.onEpisodeTap,
+  });
+
+  final List<int> seasonNumbers;
+  final int initialSeason;
+  final Episode currentEpisode;
+  final List<Episode> episodes;
+  final Map<String, bool> watchedLocal;
+  final void Function(Episode) onEpisodeTap;
+
+  @override
+  State<_SeasonSheetContent> createState() => _SeasonSheetContentState();
+}
+
+class _SeasonSheetContentState extends State<_SeasonSheetContent> {
+  late int _shownSeason;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownSeason = widget.initialSeason;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seasonIdx = widget.seasonNumbers.indexOf(_shownSeason);
+    final hasPrev = seasonIdx > 0;
+    final hasNext = seasonIdx < widget.seasonNumbers.length - 1;
+    final seasonEpisodes = widget.episodes
+        .where((ep) => ep.seasonNumber == _shownSeason)
+        .toList();
+    final seasonLabel = _shownSeason == 0 ? 'Spéciaux' : 'Saison $_shownSeason';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 8),
+        Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade400,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: hasPrev
+                    ? () => setState(() =>
+                        _shownSeason = widget.seasonNumbers[seasonIdx - 1])
+                    : null,
+                icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
+              ),
+              Expanded(
+                child: Text(
+                  seasonLabel,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(
+                onPressed: hasNext
+                    ? () => setState(() =>
+                        _shownSeason = widget.seasonNumbers[seasonIdx + 1])
+                    : null,
+                icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
+              ),
+            ],
+          ),
+        ),
+        Flexible(
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: seasonEpisodes.length,
+            itemBuilder: (_, i) {
+              final ep = seasonEpisodes[i];
+              final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+              final isWatched = widget.watchedLocal[k] ?? false;
+              final isCurrentEp =
+                  ep.seasonNumber == widget.currentEpisode.seasonNumber &&
+                  ep.episodeNumber == widget.currentEpisode.episodeNumber;
+              return ListTile(
+                dense: true,
+                selected: isCurrentEp,
+                leading: Icon(
+                  isWatched
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: isWatched ? Colors.green : Colors.grey,
+                  size: 20,
+                ),
+                title: Text(
+                  'E${ep.episodeNumber.toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    fontWeight:
+                        isCurrentEp ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                onTap: () => widget.onEpisodeTap(ep),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 }
