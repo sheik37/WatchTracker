@@ -1880,16 +1880,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
     showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 320),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (sheetCtx) => DraggableScrollableSheet(
-        initialChildSize: 1.0,
-        minChildSize: 0.4,
-        maxChildSize: 1.0,
-        expand: false,
-        builder: (_, __) => _SeasonSheetContent(
+      builder: (sheetCtx) => _SeasonSheetContent(
         seasonNumbers: seasonNumbers,
         initialSeason: _current.seasonNumber,
         currentEpisode: _current,
@@ -1900,7 +1895,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           final targetIndex = widget.episodes.indexOf(ep);
           if (targetIndex >= 0) _goTo(targetIndex);
         },
-        ),
       ),
     );
   }
