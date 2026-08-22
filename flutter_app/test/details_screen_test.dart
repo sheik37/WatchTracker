@@ -139,19 +139,20 @@ void main() {
     expect(find.textContaining('Ép. 06'), findsOneWidget);
   });
 
-  testWidgets('tap sur le numéro ouvre la bottom sheet avec les épisodes de la saison', (
-    tester,
-  ) async {
-    await tester.pumpWidget(buildPage(initialIndex: 0));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'tap sur le numéro ouvre la bottom sheet avec les épisodes de la saison',
+    (tester) async {
+      await tester.pumpWidget(buildPage(initialIndex: 0));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.textContaining('S01 | E01'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('S01 | E01'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('E01'), findsOneWidget);
-    expect(find.text('E02'), findsOneWidget);
-    expect(find.text('E03'), findsOneWidget);
-  });
+      expect(find.text('E01'), findsOneWidget);
+      expect(find.text('E02'), findsOneWidget);
+      expect(find.text('E03'), findsOneWidget);
+    },
+  );
 
   testWidgets('bottom sheet permet de naviguer entre saisons', (tester) async {
     await tester.pumpWidget(
@@ -190,9 +191,7 @@ void main() {
     expect(find.textContaining('S01 | E02'), findsOneWidget);
   });
 
-  testWidgets('navigates to previous episode via arrow button', (
-    tester,
-  ) async {
+  testWidgets('navigates to previous episode via arrow button', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 1));
     await tester.pumpAndSettle();
 
@@ -224,7 +223,9 @@ void main() {
     expect(find.textContaining('S02 | E01'), findsOneWidget);
   });
 
-  testWidgets('flèche précédent désactivée sur le premier épisode', (tester) async {
+  testWidgets('flèche précédent désactivée sur le premier épisode', (
+    tester,
+  ) async {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();
 
@@ -237,7 +238,9 @@ void main() {
     expect(prevBtn.onPressed, isNull);
   });
 
-  testWidgets('flèche suivant désactivée sur le dernier épisode', (tester) async {
+  testWidgets('flèche suivant désactivée sur le dernier épisode', (
+    tester,
+  ) async {
     await tester.pumpWidget(buildPage(initialIndex: 2));
     await tester.pumpAndSettle();
 
@@ -260,9 +263,7 @@ void main() {
     expect(find.text('Marquer non vu'), findsNothing);
   });
 
-  testWidgets('bouton affiche Marquer non vu quand épisode vu', (
-    tester,
-  ) async {
+  testWidgets('bouton affiche Marquer non vu quand épisode vu', (tester) async {
     await tester.pumpWidget(buildPage(watchedEpisodes: {'1_1'}));
     await tester.pump();
 
@@ -291,7 +292,9 @@ void main() {
     expect(toggledEpisode?.episodeNumber, 1);
   });
 
-  testWidgets('le bouton est désactivé pour les épisodes non diffusés', (tester) async {
+  testWidgets('le bouton est désactivé pour les épisodes non diffusés', (
+    tester,
+  ) async {
     await tester.pumpWidget(buildPage(initialIndex: 2));
     await tester.pump();
 
