@@ -110,10 +110,20 @@ void main() {
     expect(find.textContaining('15/03/2025'), findsOneWidget);
   });
 
+  testWidgets('shows Vu chip without date when watched but no timestamp', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildPage(watchedEpisodes: {'1_1'}));
+    await tester.pumpAndSettle();
+    expect(find.text('Vu'), findsOneWidget);
+    expect(find.textContaining('Vu le'), findsNothing);
+  });
+
   testWidgets('no watch date chip when episode is not watched', (tester) async {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
     expect(find.textContaining('Vu le'), findsNothing);
+    expect(find.text('Vu'), findsNothing);
   });
 
   testWidgets('displays series title on the page', (tester) async {

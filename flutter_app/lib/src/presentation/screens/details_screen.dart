@@ -1933,10 +1933,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             children: [
               Chip(label: Text('Date : $airDateLabel')),
               Chip(label: Text('Durée : $runtimeLabel')),
-              if (watchedLabel != null)
+              if (isWatched)
                 Chip(
                   avatar: const Icon(Icons.check_circle, size: 16),
-                  label: Text(watchedLabel),
+                  label: Text(watchedLabel ?? 'Vu'),
                 ),
             ],
           ),
@@ -1976,7 +1976,22 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final hasNext = _currentIndex < widget.episodes.length - 1;
 
     return Scaffold(
-      appBar: AppBar(),
+      appBar: AppBar(
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'toggle') await _toggleEpisode(_current);
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'toggle',
+                enabled: _isReleased,
+                child: Text(_isWatched ? 'Marquer non vu' : 'Marquer comme vu'),
+              ),
+            ],
+          ),
+        ],
+      ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
