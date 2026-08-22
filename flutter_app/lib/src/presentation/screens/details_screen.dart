@@ -1865,6 +1865,86 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 
+  List<Episode> get _currentSeasonEpisodes => widget.episodes
+      .where((ep) => ep.seasonNumber == _current.seasonNumber)
+      .toList();
+
+  void _showSeasonSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final episodes = _currentSeasonEpisodes;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'Saison ${_current.seasonNumber}',
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: episodes.length,
+                    itemBuilder: (_, i) {
+                      final ep = episodes[i];
+                      final k = '${ep.seasonNumber}_${ep.episodeNumber}';
+                      final isWatched = _watchedLocal[k] ?? false;
+                      final isCurrentEp = ep.seasonNumber == _current.seasonNumber &&
+                          ep.episodeNumber == _current.episodeNumber;
+                      return ListTile(
+                        dense: true,
+                        selected: isCurrentEp,
+                        leading: Icon(
+                          isWatched
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: isWatched ? Colors.green : Colors.grey,
+                          size: 20,
+                        ),
+                        title: Text(
+                          'E${ep.episodeNumber.toString().padLeft(2, '0')}',
+                          style: TextStyle(
+                            fontWeight: isCurrentEp
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(sheetCtx);
+                          final targetIndex = widget.episodes.indexOf(ep);
+                          if (targetIndex >= 0) _goTo(targetIndex);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildEpisodeContent(BuildContext context, int index) {
     final ep = widget.episodes[index];
     final k = '${ep.seasonNumber}_${ep.episodeNumber}';
@@ -1877,71 +1957,30 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         : 'Inconnue';
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (ep.stillPath != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: CachedNetworkImage(
-                imageUrl: ep.stillPath!,
-                height: 220,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            Container(
-              height: 220,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Center(
-                child: Icon(Icons.image_not_supported_rounded, size: 42),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              IconButton(
-                onPressed: index > 0 ? () => _goTo(index - 1) : null,
-                icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
-                tooltip: 'Épisode précédent',
-              ),
-              Expanded(
-                child: Text(
-                  '${_episodeRef(ep)}  ·  ${_globalEpLabel(ep)}',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-              ),
-              IconButton(
-                onPressed: index < widget.episodes.length - 1
-                    ? () => _goTo(index + 1)
-                    : null,
-                icon: const Icon(Icons.arrow_forward_ios_rounded, size: 20),
-                tooltip: 'Épisode suivant',
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.seriesTitle,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-            ),
-          ),
-          const SizedBox(height: 8),
           Text(
             ep.name,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall
                 ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: isWatched
+                ? OutlinedButton.icon(
+                    onPressed: () => _toggleEpisode(ep),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    label: const Text('Marquer non vu'),
+                  )
+                : FilledButton.icon(
+                    onPressed: isReleased ? () => _toggleEpisode(ep) : null,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Marquer comme vu'),
+                  ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -1957,21 +1996,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                   label: Text(watchedLabel ?? 'Vu'),
                 ),
             ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: isWatched
-                ? OutlinedButton.icon(
-                    onPressed: () => _toggleEpisode(ep),
-                    icon: const Icon(Icons.remove_circle_outline),
-                    label: const Text('Marquer non vu'),
-                  )
-                : FilledButton.icon(
-                    onPressed: isReleased ? () => _toggleEpisode(ep) : null,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Marquer comme vu'),
-                  ),
           ),
           const SizedBox(height: 16),
           Text(
@@ -1990,8 +2014,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final current = _current;
+
     return Scaffold(
       appBar: AppBar(
+        title: Text(widget.seriesTitle),
+        centerTitle: true,
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) async {
@@ -2008,11 +2036,85 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ],
       ),
       body: SafeArea(
-        child: PageView.builder(
-          controller: _pageController,
-          itemCount: widget.episodes.length,
-          onPageChanged: (index) => setState(() => _currentIndex = index),
-          itemBuilder: _buildEpisodeContent,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: current.stillPath != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: CachedNetworkImage(
+                        imageUrl: current.stillPath!,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Container(
+                      height: 220,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.image_not_supported_rounded, size: 42),
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _currentIndex > 0 ? () => _goTo(_currentIndex - 1) : null,
+                    icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+                    tooltip: 'Épisode précédent',
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _showSeasonSheet(context),
+                      onHorizontalDragEnd: (details) {
+                        final velocity = details.primaryVelocity ?? 0;
+                        if (velocity < -200 && _currentIndex < widget.episodes.length - 1) {
+                          _goTo(_currentIndex + 1);
+                        } else if (velocity > 200 && _currentIndex > 0) {
+                          _goTo(_currentIndex - 1);
+                        }
+                      },
+                      child: Text(
+                        '${_episodeRef(current)}  ·  ${_globalEpLabel(current)}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _currentIndex < widget.episodes.length - 1
+                        ? () => _goTo(_currentIndex + 1)
+                        : null,
+                    icon: const Icon(Icons.arrow_forward_ios_rounded, size: 20),
+                    tooltip: 'Épisode suivant',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: widget.episodes.length,
+                physics: const NeverScrollableScrollPhysics(),
+                onPageChanged: (index) => setState(() => _currentIndex = index),
+                itemBuilder: _buildEpisodeContent,
+              ),
+            ),
+          ],
         ),
       ),
     );

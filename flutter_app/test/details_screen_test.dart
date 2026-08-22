@@ -139,6 +139,20 @@ void main() {
     expect(find.textContaining('Ép. 06'), findsOneWidget);
   });
 
+  testWidgets('tap sur le numéro ouvre la bottom sheet avec les épisodes de la saison', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildPage(initialIndex: 0));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('S01 | E01'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('E01'), findsOneWidget);
+    expect(find.text('E02'), findsOneWidget);
+    expect(find.text('E03'), findsOneWidget);
+  });
+
   testWidgets('navigates to next episode via arrow button', (tester) async {
     await tester.pumpWidget(buildPage(initialIndex: 0));
     await tester.pumpAndSettle();
