@@ -32,6 +32,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   int? _movieWatchedAtMillis;
   bool _showEpisodes = false;
   final ScrollController _scrollCtrl = ScrollController();
+  final Map<int, List<Episode>> _episodesBySeason = {};
 
   @override
   void initState() {
@@ -505,6 +506,133 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
+  void _onSeasonEpisodesLoaded(int seasonNumber, List<Episode> episodes) {
+    _episodesBySeason[seasonNumber] = episodes;
+  }
+
+  Future<bool?> _showMarkUpToDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Épisodes précédents manquants'),
+        content: const Text(
+          'Des épisodes précédents ne sont pas cochés. Voulez-vous aussi les cocher ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Seulement celui-ci'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleEpisodeWithCheck(Episode episode, bool target) async {
+    final details = _details;
+    if (details == null) return;
+    if (episode.seasonNumber == 0) {
+      await _setEpisodeWatched(episode, target);
+      return;
+    }
+    if (!target) {
+      await _setEpisodeWatched(episode, false);
+      return;
+    }
+    final orderedSeasons = _orderedSeasons(details.seasons);
+    final offsets = _seasonOffsets(orderedSeasons);
+    final seasonOffset = offsets[episode.seasonNumber] ?? 0;
+    final expectedPreviousCount = seasonOffset + episode.episodeNumber - 1;
+
+    final watchedPositions = _watchedEpisodes
+        .where((k) => !k.startsWith('0_'))
+        .map((k) {
+          final idx = k.indexOf('_');
+          if (idx <= 0 || idx >= k.length - 1) return null;
+          final s = int.tryParse(k.substring(0, idx));
+          final e = int.tryParse(k.substring(idx + 1));
+          if (s == null || e == null) return null;
+          return s * 10000 + e;
+        })
+        .whereType<int>()
+        .toList()
+      ..sort();
+
+    final currentKey =
+        episode.seasonNumber * 10000 + episode.episodeNumber;
+    var watchedPrevious = 0;
+    for (final k in watchedPositions) {
+      if (k < currentKey) watchedPrevious++;
+    }
+
+    if (watchedPrevious < expectedPreviousCount) {
+      final shouldMarkUpTo = await _showMarkUpToDialog();
+      if (!mounted || shouldMarkUpTo == null) return;
+      if (shouldMarkUpTo) {
+        await _markEpisodeUpTo(episode);
+      } else {
+        await _setEpisodeWatched(episode, true);
+      }
+      return;
+    }
+    await _setEpisodeWatched(episode, true);
+  }
+
+  Future<void> _openEpisodeDetailPage(Episode episode) async {
+    final details = _details;
+    if (details == null) return;
+    final orderedSeasons = _orderedSeasons(details.seasons);
+    final offsets = _seasonOffsets(orderedSeasons);
+
+    final allEpisodes = <Episode>[];
+    for (final season in orderedSeasons) {
+      final cached = _episodesBySeason[season.seasonNumber];
+      if (cached != null && cached.isNotEmpty) {
+        allEpisodes.addAll(cached);
+      } else if (season.episodes.isNotEmpty) {
+        _episodesBySeason[season.seasonNumber] = season.episodes;
+        allEpisodes.addAll(season.episodes);
+      } else {
+        try {
+          final fetched = await widget.repository.getSeasonEpisodes(
+            details.id,
+            season.seasonNumber,
+          );
+          _episodesBySeason[season.seasonNumber] = fetched;
+          allEpisodes.addAll(fetched);
+        } catch (_) {}
+      }
+    }
+
+    if (allEpisodes.isEmpty || !mounted) return;
+
+    final index = allEpisodes.indexWhere(
+      (e) =>
+          e.seasonNumber == episode.seasonNumber &&
+          e.episodeNumber == episode.episodeNumber,
+    );
+    if (index < 0) return;
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (ctx) => EpisodeDetailPage(
+          episodes: allEpisodes,
+          initialIndex: index,
+          watchedEpisodes: _watchedEpisodes,
+          seasonOffsets: offsets,
+          seriesTitle: details.title,
+          isReleasedCheck: _isReleasedEpisode,
+          onToggleWatched: _toggleEpisodeWithCheck,
+        ),
+      ),
+    );
+  }
+
   Color? _progressColor() {
     return switch (_status) {
       WatchStatus.inProgress => const Color(0xFFFFC107),
@@ -592,6 +720,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   onMarkSeasonWatched: _markSeasonWatched,
                   onMarkOnlySeasonWatched: _markOnlySeasonWatched,
                   onMarkEpisodeUpTo: _markEpisodeUpTo,
+                  onOpenEpisode: _openEpisodeDetailPage,
+                  onEpisodesLoaded: _onSeasonEpisodesLoaded,
                 );
               }, childCount: orderedSeasons.length),
             )
@@ -1108,6 +1238,8 @@ class _SeasonSection extends StatefulWidget {
     required this.onMarkSeasonWatched,
     required this.onMarkOnlySeasonWatched,
     required this.onMarkEpisodeUpTo,
+    required this.onOpenEpisode,
+    required this.onEpisodesLoaded,
   });
 
   final int mediaId;
@@ -1120,6 +1252,8 @@ class _SeasonSection extends StatefulWidget {
   final Future<void> Function(Season, bool) onMarkSeasonWatched;
   final Future<void> Function(Season, bool) onMarkOnlySeasonWatched;
   final Future<void> Function(Episode) onMarkEpisodeUpTo;
+  final Future<void> Function(Episode) onOpenEpisode;
+  final void Function(int seasonNumber, List<Episode> episodes) onEpisodesLoaded;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -1175,6 +1309,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
     if (_episodes.isNotEmpty || widget.season.episodeCount <= 0) return;
     if (widget.season.episodes.isNotEmpty) {
       setState(() => _episodes = widget.season.episodes);
+      widget.onEpisodesLoaded(widget.season.seasonNumber, widget.season.episodes);
       return;
     }
     setState(() => _loadingEpisodes = true);
@@ -1185,6 +1320,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
       );
       if (!mounted) return;
       setState(() => _episodes = fetched);
+      widget.onEpisodesLoaded(widget.season.seasonNumber, fetched);
     } finally {
       if (mounted) {
         setState(() => _loadingEpisodes = false);
@@ -1271,32 +1407,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
           ),
         ],
       ),
-    );
-  }
-
-  Future<void> _openEpisodeDialog(Episode episode) async {
-    var dialogChecked = _isWatched(episode);
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return _EpisodeDialog(
-              episode: episode,
-              checked: dialogChecked,
-              onDismiss: () => Navigator.of(dialogContext).pop(),
-              onCheckedChange: (target) async {
-                setDialogState(() => dialogChecked = target);
-                await _onEpisodeCheckRequest(episode, target);
-                if (!mounted) return;
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).pop();
-                }
-              },
-            );
-          },
-        );
-      },
     );
   }
 
@@ -1493,7 +1603,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                 .surfaceContainerHighest
                                 .withValues(alpha: 0.35),
                             child: ListTile(
-                              onTap: () => _openEpisodeDialog(ep),
+                              onTap: () => widget.onOpenEpisode(ep),
                               leading: SizedBox(
                                 width: 72,
                                 height: 72,
@@ -1590,58 +1700,210 @@ class _EpisodeReleaseStatus extends StatelessWidget {
   }
 }
 
-class _EpisodeDialog extends StatelessWidget {
-  const _EpisodeDialog({
-    required this.episode,
-    required this.checked,
-    required this.onDismiss,
-    required this.onCheckedChange,
+class EpisodeDetailPage extends StatefulWidget {
+  const EpisodeDetailPage({
+    super.key,
+    required this.episodes,
+    required this.initialIndex,
+    required this.watchedEpisodes,
+    required this.seasonOffsets,
+    required this.seriesTitle,
+    required this.isReleasedCheck,
+    required this.onToggleWatched,
   });
 
-  final Episode episode;
-  final bool checked;
-  final VoidCallback onDismiss;
-  final ValueChanged<bool> onCheckedChange;
+  final List<Episode> episodes;
+  final int initialIndex;
+  final Set<String> watchedEpisodes;
+  final Map<int, int> seasonOffsets;
+  final String seriesTitle;
+  final bool Function(Episode) isReleasedCheck;
+  final Future<void> Function(Episode, bool) onToggleWatched;
+
+  @override
+  State<EpisodeDetailPage> createState() => _EpisodeDetailPageState();
+}
+
+class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
+  late int _currentIndex;
+  late final Map<String, bool> _watchedLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _watchedLocal = {
+      for (final ep in widget.episodes)
+        '${ep.seasonNumber}_${ep.episodeNumber}': widget.watchedEpisodes
+            .contains('${ep.seasonNumber}_${ep.episodeNumber}'),
+    };
+  }
+
+  Episode get _current => widget.episodes[_currentIndex];
+
+  bool get _isWatched =>
+      _watchedLocal['${_current.seasonNumber}_${_current.episodeNumber}'] ??
+      false;
+
+  bool get _isReleased => widget.isReleasedCheck(_current);
+
+  String _episodeRef(Episode ep) =>
+      'S${ep.seasonNumber.toString().padLeft(2, '0')} | E${ep.episodeNumber.toString().padLeft(2, '0')}';
+
+  String _globalEpLabel(Episode ep) {
+    final offset = widget.seasonOffsets[ep.seasonNumber] ?? 0;
+    return 'Ép. ${(offset + ep.episodeNumber).toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              episode.name,
-              style: Theme.of(context).textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Titre : ${episode.name}'),
-            Text('Date de parution : ${episode.airDate ?? 'Inconnue'}'),
-            Text(
-              'Durée : ${episode.runtime != null ? '${episode.runtime} min' : 'Inconnue'}',
-            ),
-            const SizedBox(height: 8),
-            Text(
-              episode.overview.isEmpty
-                  ? 'Aucun synopsis disponible.'
-                  : episode.overview,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Checkbox(
-                  value: checked,
-                  onChanged: (target) => onCheckedChange(target ?? false),
+    final episode = _current;
+    final hasPrev = _currentIndex > 0;
+    final hasNext = _currentIndex < widget.episodes.length - 1;
+    final runtimeLabel = episode.runtime != null
+        ? '${episode.runtime} min'
+        : 'Inconnue';
+    final airDateLabel = episode.airDate?.isNotEmpty == true
+        ? episode.airDate!
+        : 'Inconnue';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _episodeRef(episode),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'toggle') {
+                final target = !_isWatched;
+                final key =
+                    '${_current.seasonNumber}_${_current.episodeNumber}';
+                setState(() => _watchedLocal[key] = target);
+                await widget.onToggleWatched(_current, target);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'toggle',
+                enabled: _isReleased,
+                child: Text(_isWatched ? 'Marquer non vu' : 'Marquer comme vu'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: hasPrev
+                      ? () => setState(() => _currentIndex--)
+                      : null,
+                  icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
+                  label: const Text('Précédent'),
                 ),
-                const Text('Vu'),
-                const Spacer(),
-                TextButton(onPressed: onDismiss, child: const Text('Fermer')),
-              ],
-            ),
-          ],
+              ),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: hasNext
+                      ? () => setState(() => _currentIndex++)
+                      : null,
+                  iconAlignment: IconAlignment.end,
+                  icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
+                  label: const Text('Suivant'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (episode.stillPath != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: CachedNetworkImage(
+                    imageUrl: episode.stillPath!,
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                Container(
+                  height: 220,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.image_not_supported_rounded, size: 42),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Text(
+                '${_episodeRef(episode)}  ·  ${_globalEpLabel(episode)}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.seriesTitle,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153),
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                episode.name,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text('Date : $airDateLabel')),
+                  Chip(label: Text('Durée : $runtimeLabel')),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Synopsis',
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                episode.overview.isEmpty
+                    ? 'Aucun synopsis disponible.'
+                    : episode.overview,
+              ),
+            ],
+          ),
         ),
       ),
     );
