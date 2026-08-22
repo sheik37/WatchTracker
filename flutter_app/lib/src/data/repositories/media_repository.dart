@@ -386,12 +386,14 @@ class MediaRepository {
     required int seasonNumber,
     required int episodeNumber,
     required bool isWatched,
+    int? updatedAtMillis,
   }) async {
     await _database.upsertEpisodeProgress(
       mediaId: mediaId,
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
       isWatched: isWatched,
+      updatedAtMillis: updatedAtMillis,
     );
     final backend = _backendApi;
     if (backend != null) {

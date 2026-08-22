@@ -217,7 +217,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  Future<void> _setEpisodeWatched(Episode episode, bool watched) async {
+  Future<void> _setEpisodeWatched(
+    Episode episode,
+    bool watched,
+    int? updatedAtMillis,
+  ) async {
     final details = _details;
     if (details == null) return;
     final key = '${episode.seasonNumber}_${episode.episodeNumber}';
@@ -225,9 +229,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final next = <String>{..._watchedEpisodes};
     final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final ts = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     if (watched) {
       next.add(key);
-      nextAt[key] = DateTime.now().millisecondsSinceEpoch;
+      nextAt[key] = ts;
     } else {
       next.remove(key);
       nextAt.remove(key);
@@ -246,6 +251,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         seasonNumber: episode.seasonNumber,
         episodeNumber: episode.episodeNumber,
         isWatched: watched,
+        updatedAtMillis: watched ? ts : null,
       );
     } catch (e) {
       if (!mounted) return;
@@ -353,7 +359,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
     await _applyEpisodeUpdates(details, updates);
   }
 
-  Future<void> _markEpisodeUpTo(Episode targetEpisode) async {
+  Future<void> _markEpisodeUpTo(
+    Episode targetEpisode,
+    int? updatedAtMillis,
+  ) async {
     final details = _details;
     if (details == null) return;
     await _ensureTvTrackedForEpisodeUpdate(details);
@@ -368,6 +377,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         episodeCount: targetEpisode.episodeNumber,
       ),
     );
+    final ts = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final updates = <RemoteEpisodeProgress>[];
     for (final season in seasons.where(
       (s) => s.seasonNumber < targetEpisode.seasonNumber,
@@ -379,6 +389,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
             seasonNumber: season.seasonNumber,
             episodeNumber: i,
             isWatched: true,
+            updatedAtMillis: ts,
           ),
         );
       }
@@ -393,28 +404,39 @@ class _DetailsScreenState extends State<DetailsScreen> {
           seasonNumber: targetEpisode.seasonNumber,
           episodeNumber: i,
           isWatched: true,
+          updatedAtMillis: ts,
         ),
       );
     }
-    await _applyEpisodeUpdates(details, updates);
+    await _applyEpisodeUpdates(details, updates, ts);
   }
 
   Future<void> _applyEpisodeUpdates(
     MediaDetails details,
-    List<RemoteEpisodeProgress> updates,
-  ) async {
+    List<RemoteEpisodeProgress> updates, [
+    int? sharedTimestamp,
+  ]) async {
     if (updates.isEmpty) return;
     final previous = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final next = <String>{..._watchedEpisodes};
+    final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final nowFallback =
+        sharedTimestamp ?? DateTime.now().millisecondsSinceEpoch;
     for (final update in updates) {
       final key = '${update.seasonNumber}_${update.episodeNumber}';
       if (update.isWatched) {
         next.add(key);
+        nextAt[key] = update.updatedAtMillis ?? nowFallback;
       } else {
         next.remove(key);
+        nextAt.remove(key);
       }
     }
-    setState(() => _watchedEpisodes = next);
+    setState(() {
+      _watchedEpisodes = next;
+      _episodeWatchedAt = nextAt;
+    });
     _updateTvStatus(details);
     try {
       await widget.repository.updateEpisodeProgressBatch(
@@ -423,7 +445,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _watchedEpisodes = previous);
+      setState(() {
+        _watchedEpisodes = previous;
+        _episodeWatchedAt = previousAt;
+      });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour la saison: $e')),
@@ -553,11 +578,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final details = _details;
     if (details == null) return;
     if (episode.seasonNumber == 0) {
-      await _setEpisodeWatched(episode, target);
+      await _setEpisodeWatched(episode, target, null);
       return;
     }
     if (!target) {
-      await _setEpisodeWatched(episode, false);
+      await _setEpisodeWatched(episode, false, null);
       return;
     }
     final orderedSeasons = _orderedSeasons(details.seasons);
@@ -587,16 +612,17 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
 
     if (watchedPrevious < expectedPreviousCount) {
+      final now = DateTime.now().millisecondsSinceEpoch;
       final shouldMarkUpTo = await _showMarkUpToDialog();
       if (!mounted || shouldMarkUpTo == null) return;
       if (shouldMarkUpTo) {
-        await _markEpisodeUpTo(episode);
+        await _markEpisodeUpTo(episode, now);
       } else {
-        await _setEpisodeWatched(episode, true);
+        await _setEpisodeWatched(episode, true, now);
       }
       return;
     }
-    await _setEpisodeWatched(episode, true);
+    await _setEpisodeWatched(episode, true, null);
   }
 
   Future<void> _openEpisodeDetailPage(Episode episode) async {
@@ -1265,10 +1291,10 @@ class _SeasonSection extends StatefulWidget {
   final Season season;
   final int seasonOffset;
   final Set<String> watchedEpisodes;
-  final Future<void> Function(Episode, bool) onToggleEpisode;
+  final Future<void> Function(Episode, bool, int?) onToggleEpisode;
   final Future<void> Function(Season, bool) onMarkSeasonWatched;
   final Future<void> Function(Season, bool) onMarkOnlySeasonWatched;
-  final Future<void> Function(Episode) onMarkEpisodeUpTo;
+  final Future<void> Function(Episode, int?) onMarkEpisodeUpTo;
   final Future<void> Function(Episode) onOpenEpisode;
   final void Function(int seasonNumber, List<Episode> episodes)
   onEpisodesLoaded;
@@ -1351,11 +1377,11 @@ class _SeasonSectionState extends State<_SeasonSection> {
 
   Future<void> _onEpisodeCheckRequest(Episode episode, bool target) async {
     if (_isSpecialSeason) {
-      await widget.onToggleEpisode(episode, target);
+      await widget.onToggleEpisode(episode, target, null);
       return;
     }
     if (!target) {
-      await widget.onToggleEpisode(episode, false);
+      await widget.onToggleEpisode(episode, false, null);
       return;
     }
     final watchedPositions =
@@ -1373,16 +1399,17 @@ class _SeasonSectionState extends State<_SeasonSection> {
       current,
     );
     if (watchedPrevious < _expectedPreviousCount(episode)) {
+      final now = DateTime.now().millisecondsSinceEpoch;
       final shouldMarkUpTo = await _showMarkPreviousEpisodesDialog();
       if (!mounted || shouldMarkUpTo == null) return;
       if (shouldMarkUpTo) {
-        await widget.onMarkEpisodeUpTo(episode);
+        await widget.onMarkEpisodeUpTo(episode, now);
       } else {
-        await widget.onToggleEpisode(episode, true);
+        await widget.onToggleEpisode(episode, true, now);
       }
       return;
     }
-    await widget.onToggleEpisode(episode, true);
+    await widget.onToggleEpisode(episode, true, null);
   }
 
   Future<bool?> _showMarkPreviousEpisodesDialog() {
