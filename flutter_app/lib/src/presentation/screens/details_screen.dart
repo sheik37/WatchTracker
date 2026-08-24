@@ -1841,18 +1841,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
                     ],
                   ),
                 ),
-                if (totalCount > 0 && !allWatched)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.tonalIcon(
-                        onPressed: () => _onSeasonCheckRequest(true),
-                        icon: const Icon(Icons.done_all_rounded, size: 18),
-                        label: const Text("Cocher jusqu'ici"),
-                      ),
-                    ),
-                  ),
                 if (showProgress)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2142,10 +2130,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'Vu le ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 
-  List<Episode> get _currentSeasonEpisodes => widget.episodes
-      .where((ep) => ep.seasonNumber == _current.seasonNumber)
-      .toList();
-
   void _showSeasonSheet(BuildContext context) {
     // Liste ordonnée des numéros de saison (même ordre que _orderedSeasons)
     final seasonNumbers = widget.seasonOffsets.keys.toList()
@@ -2291,7 +2275,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: const Center(
-                        child: Icon(Icons.image_not_supported_rounded, size: 42),
+                        child: Icon(
+                          Icons.image_not_supported_rounded,
+                          size: 42,
+                        ),
                       ),
                     ),
             ),
@@ -2301,7 +2288,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: _currentIndex > 0 ? () => _goTo(_currentIndex - 1) : null,
+                    onPressed: _currentIndex > 0
+                        ? () => _goTo(_currentIndex - 1)
+                        : null,
                     icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
                     tooltip: 'Épisode précédent',
                   ),
@@ -2311,7 +2300,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       onTap: () => _showSeasonSheet(context),
                       onHorizontalDragEnd: (details) {
                         final velocity = details.primaryVelocity ?? 0;
-                        if (velocity < -200 && _currentIndex < widget.episodes.length - 1) {
+                        if (velocity < -200 &&
+                            _currentIndex < widget.episodes.length - 1) {
                           _goTo(_currentIndex + 1);
                         } else if (velocity > 200 && _currentIndex > 0) {
                           _goTo(_currentIndex - 1);
@@ -2392,9 +2382,11 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
         .toList();
     final seasonLabel = _shownSeason == 0 ? 'Spéciaux' : 'Saison $_shownSeason';
     final watchedCount = seasonEpisodes
-        .where((ep) =>
-            widget.watchedLocal['${ep.seasonNumber}_${ep.episodeNumber}'] ??
-            false)
+        .where(
+          (ep) =>
+              widget.watchedLocal['${ep.seasonNumber}_${ep.episodeNumber}'] ??
+              false,
+        )
         .length;
 
     return Column(
@@ -2415,8 +2407,10 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
             children: [
               IconButton(
                 onPressed: hasPrev
-                    ? () => setState(() =>
-                        _shownSeason = widget.seasonNumbers[seasonIdx - 1])
+                    ? () => setState(
+                        () =>
+                            _shownSeason = widget.seasonNumbers[seasonIdx - 1],
+                      )
                     : null,
                 icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
               ),
@@ -2432,17 +2426,18 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
                     Text(
                       '$watchedCount / ${seasonEpisodes.length} vus',
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.grey,
-                          ),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: Colors.grey),
                     ),
                   ],
                 ),
               ),
               IconButton(
                 onPressed: hasNext
-                    ? () => setState(() =>
-                        _shownSeason = widget.seasonNumbers[seasonIdx + 1])
+                    ? () => setState(
+                        () =>
+                            _shownSeason = widget.seasonNumbers[seasonIdx + 1],
+                      )
                     : null,
                 icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
               ),
@@ -2477,8 +2472,9 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
                     Text(
                       'E${ep.episodeNumber.toString().padLeft(2, '0')}',
                       style: TextStyle(
-                        fontWeight:
-                            isCurrentEp ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: isCurrentEp
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                       ),
                     ),
                   ],
