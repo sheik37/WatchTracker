@@ -33,8 +33,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Map<String, int> _episodeWatchedAt = {};
   int? _movieWatchedAtMillis;
   bool _showEpisodes = false;
+  int _tvTabDirection = 1;
   final ScrollController _scrollCtrl = ScrollController();
   final Map<int, List<Episode>> _episodesBySeason = {};
+  double _tvSwipeDelta = 0;
 
   @override
   void initState() {
@@ -562,13 +564,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
           'Des épisodes précédents ne sont pas cochés. Voulez-vous aussi les cocher ?',
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Seulement celui-ci'),
           ),
-          TextButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Valider'),
+            icon: const Icon(Icons.done_all_rounded, size: 18),
+            label: const Text("Cocher jusqu'ici"),
           ),
         ],
       ),
@@ -700,6 +703,104 @@ class _DetailsScreenState extends State<DetailsScreen> {
     return 1.0;
   }
 
+  void _setTvTab(bool showEpisodes) {
+    if (_showEpisodes == showEpisodes) return;
+    setState(() {
+      _tvTabDirection = showEpisodes ? 1 : -1;
+      _showEpisodes = showEpisodes;
+    });
+  }
+
+  void _handleTvTabSwipe(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    const minSwipeVelocity = 250.0;
+    const minSwipeDistance = 80.0;
+    if ((velocity <= -minSwipeVelocity || _tvSwipeDelta <= -minSwipeDistance) &&
+        !_showEpisodes) {
+      _setTvTab(true);
+    } else if ((velocity >= minSwipeVelocity ||
+            _tvSwipeDelta >= minSwipeDistance) &&
+        _showEpisodes) {
+      _setTvTab(false);
+    }
+    _tvSwipeDelta = 0;
+  }
+
+  Widget _buildTvTabContent(
+    MediaDetails details,
+    List<Season> orderedSeasons,
+    Map<int, int> seasonOffsets,
+  ) {
+    const aboutKey = ValueKey('tv-tab-about');
+    const episodesKey = ValueKey('tv-tab-episodes');
+    final currentKey = _showEpisodes ? episodesKey : aboutKey;
+    final direction = _tvTabDirection.toDouble();
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      layoutBuilder: (currentChild, previousChildren) {
+        final children = <Widget>[...previousChildren];
+        if (currentChild != null) {
+          children.add(currentChild);
+        }
+        return ClipRect(
+          child: Stack(alignment: Alignment.topCenter, children: children),
+        );
+      },
+      transitionBuilder: (child, animation) {
+        final isIncoming = child.key == currentKey;
+        final offsetTween = isIncoming
+            ? Tween<Offset>(
+                begin: Offset(direction * 0.18, 0),
+                end: Offset.zero,
+              )
+            : Tween<Offset>(
+                begin: Offset(-direction * 0.18, 0),
+                end: Offset.zero,
+              );
+        return SlideTransition(
+          position: offsetTween.animate(animation),
+          child: child,
+        );
+      },
+      child: _showEpisodes
+          ? KeyedSubtree(
+              key: episodesKey,
+              child: Column(
+                children: [
+                  for (final season in orderedSeasons)
+                    _SeasonSection(
+                      key: PageStorageKey<String>(
+                        'season_${details.id}_${season.seasonNumber}',
+                      ),
+                      mediaId: details.id,
+                      repository: widget.repository,
+                      parentScrollController: _scrollCtrl,
+                      season: season,
+                      seasonOffset: seasonOffsets[season.seasonNumber] ?? 0,
+                      watchedEpisodes: _watchedEpisodes,
+                      onToggleEpisode: _setEpisodeWatched,
+                      onMarkSeasonWatched: _markSeasonWatched,
+                      onMarkOnlySeasonWatched: _markOnlySeasonWatched,
+                      onMarkEpisodeUpTo: _markEpisodeUpTo,
+                      onOpenEpisode: _openEpisodeDetailPage,
+                      onEpisodesLoaded: _onSeasonEpisodesLoaded,
+                    ),
+                ],
+              ),
+            )
+          : KeyedSubtree(
+              key: aboutKey,
+              child: _TvAbout(
+                details: details,
+                category: details.watchCategory(),
+              ),
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading && _details == null) {
@@ -727,98 +828,83 @@ class _DetailsScreenState extends State<DetailsScreen> {
               onAdd: _toggleWatchlist,
             )
           : null,
-      body: CustomScrollView(
-        controller: _scrollCtrl,
-        slivers: [
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _DetailsHeaderDelegate(
-              details: details,
-              isTV: isTV,
-              showEpisodes: _showEpisodes,
-              onShowEpisodesChanged: (v) => setState(() => _showEpisodes = v),
-              tracked: _tracked,
-              progressColor: progressColor,
-              progressValue: progressColor != null
-                  ? _progressValue(details)
-                  : null,
-              watchedGlobal: _tracked && isTV
-                  ? _watchedEpisodes.where((k) => !k.startsWith('0_')).length
-                  : null,
-              totalGlobal: _tracked && isTV
-                  ? details.seasons
-                      .where((s) => s.seasonNumber != 0)
-                      .fold<int>(0, (acc, s) => acc + s.episodeCount)
-                  : null,
-              onBack: () => Navigator.of(context).pop(),
-              onToggleWatchlist: _toggleWatchlist,
-              statusBarHeight: statusBarHeight,
-            ),
-          ),
-          if (isTV && _showEpisodes)
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, i) {
-                if (i >= orderedSeasons.length) return null;
-                return _SeasonSection(
-                  key: PageStorageKey<String>(
-                    'season_${details.id}_${orderedSeasons[i].seasonNumber}',
-                  ),
-                  mediaId: details.id,
-                  repository: widget.repository,
-                  parentScrollController: _scrollCtrl,
-                  season: orderedSeasons[i],
-                  seasonOffset:
-                      seasonOffsets[orderedSeasons[i].seasonNumber] ?? 0,
-                  watchedEpisodes: _watchedEpisodes,
-                  onToggleEpisode: _setEpisodeWatched,
-                  onMarkSeasonWatched: _markSeasonWatched,
-                  onMarkOnlySeasonWatched: _markOnlySeasonWatched,
-                  onMarkEpisodeUpTo: _markEpisodeUpTo,
-                  onOpenEpisode: _openEpisodeDetailPage,
-                  onEpisodesLoaded: _onSeasonEpisodesLoaded,
-                );
-              }, childCount: orderedSeasons.length),
-            )
-          else if (isTV && !_showEpisodes)
-            SliverToBoxAdapter(
-              child: _TvAbout(
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: isTV ? (_) => _tvSwipeDelta = 0 : null,
+        onHorizontalDragUpdate: isTV
+            ? (details) => _tvSwipeDelta += details.primaryDelta ?? 0
+            : null,
+        onHorizontalDragEnd: isTV ? _handleTvTabSwipe : null,
+        child: CustomScrollView(
+          controller: _scrollCtrl,
+          slivers: [
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _DetailsHeaderDelegate(
                 details: details,
-                category: details.watchCategory(),
-              ),
-            )
-          else ...[
-            SliverToBoxAdapter(
-              child: _MovieInfoStrip(
-                releaseDate: details.releaseDate,
-                isWatched: _status == WatchStatus.watched,
-                watchedAtMillis: _movieWatchedAtMillis,
-                onChanged: _setMovieWatched,
+                isTV: isTV,
+                showEpisodes: _showEpisodes,
+                onShowEpisodesChanged: _setTvTab,
+                tracked: _tracked,
+                progressColor: progressColor,
+                progressValue: progressColor != null
+                    ? _progressValue(details)
+                    : null,
+                watchedGlobal: _tracked && isTV
+                    ? _watchedEpisodes.where((k) => !k.startsWith('0_')).length
+                    : null,
+                totalGlobal: _tracked && isTV
+                    ? details.seasons
+                          .where((s) => s.seasonNumber != 0)
+                          .fold<int>(0, (acc, s) => acc + s.episodeCount)
+                    : null,
+                onBack: () => Navigator.of(context).pop(),
+                onToggleWatchlist: _toggleWatchlist,
+                statusBarHeight: statusBarHeight,
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Synopsis',
-                      style: Theme.of(context).textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      details.overview.isEmpty
-                          ? 'Aucun synopsis disponible.'
-                          : details.overview,
-                    ),
-                  ],
+            if (isTV)
+              SliverToBoxAdapter(
+                child: _buildTvTabContent(
+                  details,
+                  orderedSeasons,
+                  seasonOffsets,
+                ),
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: _MovieInfoStrip(
+                  releaseDate: details.releaseDate,
+                  isWatched: _status == WatchStatus.watched,
+                  watchedAtMillis: _movieWatchedAtMillis,
+                  onChanged: _setMovieWatched,
                 ),
               ),
-            ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Synopsis',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        details.overview.isEmpty
+                            ? 'Aucun synopsis disponible.'
+                            : details.overview,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
-        ],
+        ),
       ),
     );
   }
@@ -1070,7 +1156,9 @@ class _MediaHeader extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (watchedGlobal != null && totalGlobal != null && totalGlobal! > 0) ...[
+                      if (watchedGlobal != null &&
+                          totalGlobal != null &&
+                          totalGlobal! > 0) ...[
                         const Text(
                           ' • ',
                           style: TextStyle(color: Colors.white70, fontSize: 18),
@@ -1079,7 +1167,7 @@ class _MediaHeader extends StatelessWidget {
                           '$watchedGlobal / $totalGlobal épisodes vus',
                           style: const TextStyle(
                             color: Colors.white70,
-                            fontSize: 14,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -1302,6 +1390,85 @@ class _MovieInfoStrip extends StatelessWidget {
   }
 }
 
+class _WatchedToggleButton extends StatelessWidget {
+  const _WatchedToggleButton({
+    super.key,
+    required this.checked,
+    required this.onTap,
+    required this.tooltip,
+    this.size = 34,
+  });
+
+  final bool checked;
+  final VoidCallback? onTap;
+  final String tooltip;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeColor = colorScheme.primary;
+    final inactiveColor = colorScheme.surfaceContainerHigh;
+    final borderColor = checked ? activeColor : colorScheme.outlineVariant;
+
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        checked: checked,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: checked ? activeColor : inactiveColor,
+                border: Border.all(color: borderColor),
+                boxShadow: checked
+                    ? [
+                        BoxShadow(
+                          color: activeColor.withValues(alpha: 0.22),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  child: checked
+                      ? Icon(
+                          Icons.check_rounded,
+                          key: const ValueKey('checked'),
+                          color: colorScheme.onPrimary,
+                          size: size * 0.56,
+                        )
+                      : Container(
+                          key: const ValueKey('unchecked'),
+                          width: size * 0.18,
+                          height: size * 0.18,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colorScheme.outlineVariant,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SeasonSection extends StatefulWidget {
   const _SeasonSection({
     super.key,
@@ -1479,13 +1646,14 @@ class _SeasonSectionState extends State<_SeasonSection> {
           'Des épisodes de saisons précédentes ne sont pas cochés. Voulez-vous aussi les cocher ?',
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Seulement cette saison'),
           ),
-          TextButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Valider'),
+            icon: const Icon(Icons.done_all_rounded, size: 18),
+            label: const Text("Cocher jusqu'ici"),
           ),
         ],
       ),
@@ -1495,6 +1663,84 @@ class _SeasonSectionState extends State<_SeasonSection> {
   String _seasonTitle() => _isSpecialSeason
       ? 'Épisodes spéciaux'
       : 'Saison ${widget.season.seasonNumber}';
+
+  Future<void> _onSeasonCheckRequest(bool target) async {
+    if (!target || _isSpecialSeason) {
+      await widget.onMarkSeasonWatched(widget.season, target);
+      return;
+    }
+    final watchedPositions =
+        widget.watchedEpisodes
+            .map(_parseEpisodePositionKey)
+            .whereType<int>()
+            .toList()
+          ..sort();
+    final firstEpisodePosition = _episodePositionKey(
+      widget.season.seasonNumber,
+      1,
+    );
+    final watchedBefore = _countWatchedBeforePosition(
+      watchedPositions,
+      firstEpisodePosition,
+    );
+    final expectedBefore = widget.seasonOffset;
+    if (watchedBefore < expectedBefore) {
+      final includePrevious = await _showMarkPreviousSeasonsDialog();
+      if (includePrevious == null) return;
+      if (includePrevious) {
+        await widget.onMarkSeasonWatched(widget.season, true);
+      } else {
+        await widget.onMarkOnlySeasonWatched(widget.season, true);
+      }
+      return;
+    }
+    await widget.onMarkSeasonWatched(widget.season, true);
+  }
+
+  Widget _buildEmptyState() {
+    final hasEpisodes = widget.season.episodeCount > 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Card(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.38),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Icon(
+                Icons.playlist_remove_rounded,
+                size: 34,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                hasEpisodes ? 'Aucun épisode chargé' : 'Saison vide',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                hasEpisodes
+                    ? 'Les épisodes n’ont pas encore été chargés.'
+                    : 'Cette saison ne contient pas d’épisodes.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (hasEpisodes) ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: _loadEpisodesIfNeeded,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Réessayer'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   String _episodeNumbers(Episode episode) {
     final globalNumber = widget.seasonOffset + episode.episodeNumber;
@@ -1524,11 +1770,19 @@ class _SeasonSectionState extends State<_SeasonSection> {
     final progressColor = allWatched
         ? const Color(0xFF4CAF50)
         : const Color(0xFFFFC107);
+    final progressTrackColor = Theme.of(context)
+        .colorScheme
+        .surfaceContainerHighest
+        .withValues(alpha: 0.8);
 
     return Column(
       children: [
         Card(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           color: Theme.of(context).colorScheme.surfaceContainerHighest
               .withValues(alpha: 0.45),
           child: InkWell(
@@ -1573,61 +1827,47 @@ class _SeasonSectionState extends State<_SeasonSection> {
                         ),
                         const SizedBox(width: 8),
                       ],
-                      Checkbox(
-                        value: allWatched,
-                        onChanged: (checked) async {
-                          final target = checked ?? false;
-                          if (!target || _isSpecialSeason) {
-                            await widget.onMarkSeasonWatched(
-                              widget.season,
-                              target,
-                            );
-                            return;
-                          }
-                          final watchedPositions =
-                              widget.watchedEpisodes
-                                  .map(_parseEpisodePositionKey)
-                                  .whereType<int>()
-                                  .toList()
-                                ..sort();
-                          final firstEpisodePosition = _episodePositionKey(
-                            widget.season.seasonNumber,
-                            1,
-                          );
-                          final watchedBefore = _countWatchedBeforePosition(
-                            watchedPositions,
-                            firstEpisodePosition,
-                          );
-                          final expectedBefore = widget.seasonOffset;
-                          if (watchedBefore < expectedBefore) {
-                            final includePrevious =
-                                await _showMarkPreviousSeasonsDialog();
-                            if (includePrevious == null) return;
-                            if (includePrevious) {
-                              await widget.onMarkSeasonWatched(
-                                widget.season,
-                                true,
-                              );
-                            } else {
-                              await widget.onMarkOnlySeasonWatched(
-                                widget.season,
-                                true,
-                              );
-                            }
-                            return;
-                          }
-                          await widget.onMarkSeasonWatched(widget.season, true);
-                        },
+                      _WatchedToggleButton(
+                        key: ValueKey(
+                          'season-toggle-${widget.season.seasonNumber}',
+                        ),
+                        checked: allWatched,
+                        size: 36,
+                        tooltip: allWatched
+                            ? 'Marquer la saison non vue'
+                            : 'Marquer la saison vue',
+                        onTap: () => _onSeasonCheckRequest(!allWatched),
                       ),
                     ],
                   ),
                 ),
+                if (totalCount > 0 && !allWatched)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _onSeasonCheckRequest(true),
+                        icon: const Icon(Icons.done_all_rounded, size: 18),
+                        label: const Text("Cocher jusqu'ici"),
+                      ),
+                    ),
+                  ),
                 if (showProgress)
-                  LinearProgressIndicator(
-                    value: progress.clamp(0.0, 1.0),
-                    minHeight: 4,
-                    color: progressColor,
-                    backgroundColor: Theme.of(context).colorScheme.surface,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        key: ValueKey(
+                          'season-progress-${widget.season.seasonNumber}',
+                        ),
+                        value: progress.clamp(0.0, 1.0),
+                        minHeight: 8,
+                        color: progressColor,
+                        backgroundColor: progressTrackColor,
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -1639,6 +1879,8 @@ class _SeasonSectionState extends State<_SeasonSection> {
                   padding: EdgeInsets.all(16),
                   child: Center(child: CircularProgressIndicator()),
                 )
+              : _episodes.isEmpty
+              ? _buildEmptyState()
               : SizedBox(
                   height: (_episodes.length * 96.0).clamp(0.0, 520.0),
                   child: NotificationListener<OverscrollNotification>(
@@ -1719,13 +1961,17 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                     ),
                               trailing: showReleaseStatus
                                   ? _EpisodeReleaseStatus(airDate: ep.airDate)
-                                  : Checkbox(
-                                      value: watched,
-                                      onChanged: (target) =>
-                                          _onEpisodeCheckRequest(
-                                            ep,
-                                            target ?? false,
-                                          ),
+                                  : _WatchedToggleButton(
+                                      key: ValueKey(
+                                        'episode-toggle-${ep.seasonNumber}_${ep.episodeNumber}',
+                                      ),
+                                      checked: watched,
+                                      size: 32,
+                                      tooltip: watched
+                                          ? 'Marquer l\'épisode non vu'
+                                          : 'Marquer l\'épisode vu',
+                                      onTap: () =>
+                                          _onEpisodeCheckRequest(ep, !watched),
                                     ),
                             ),
                           ),

@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/src/data/local/watchtracker_database.dart';
+import 'package:flutter_app/src/data/models/backend_models.dart';
 import 'package:flutter_app/src/data/models/details_models.dart';
+import 'package:flutter_app/src/data/models/media_models.dart';
+import 'package:flutter_app/src/data/remote/tmdb_api_client.dart';
+import 'package:flutter_app/src/data/remote/tvdb_api_client.dart';
+import 'package:flutter_app/src/data/repositories/media_repository.dart';
 import 'package:flutter_app/src/presentation/screens/details_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,6 +69,52 @@ void main() {
   const defaultOffsets = {1: 0};
   const defaultSeriesTitle = 'Ma Série';
   const emptyWatchedAt = <String, int>{};
+  const titleMedia = Media(
+    id: 100,
+    title: 'Série swipe',
+    posterPath: null,
+    backdropPath: null,
+    overview: 'Résumé de test',
+    releaseDate: '2024-01-01',
+    voteAverage: 8,
+    mediaType: MediaType.tv,
+  );
+  const titleDetails = MediaDetails(
+    id: 100,
+    title: 'Série swipe',
+    overview: 'Résumé de test',
+    posterPath: null,
+    backdropPath: null,
+    releaseDate: '2024-01-01',
+    voteAverage: 8,
+    mediaType: MediaType.tv,
+    tvStatus: TvStatus.returningSeries,
+    seasons: [
+      Season(id: 200, name: 'Saison 1', seasonNumber: 1, episodeCount: 2),
+    ],
+  );
+  final titleSeasonEpisodes = [
+    Episode(
+      id: 201,
+      name: 'Pilote',
+      overview: 'Premier épisode',
+      episodeNumber: 1,
+      seasonNumber: 1,
+      stillPath: null,
+      airDate: '2024-01-01',
+      runtime: 42,
+    ),
+    Episode(
+      id: 202,
+      name: 'Suite',
+      overview: 'Deuxième épisode',
+      episodeNumber: 2,
+      seasonNumber: 1,
+      stillPath: null,
+      airDate: '2024-01-08',
+      runtime: 43,
+    ),
+  ];
 
   Widget buildPage({
     int initialIndex = 0,
@@ -88,6 +140,34 @@ void main() {
         getProgress:
             getProgress ??
             () => (watched: watchedEpisodes, watchedAt: episodeWatchedAt),
+      ),
+    );
+  }
+
+  Widget buildTitlePage({
+    Set<String> watchedEpisodes = const {'1_1'},
+    List<Episode>? seasonEpisodes,
+  }) {
+    return MaterialApp(
+      home: DetailsScreen(
+        repository: _FakeMediaRepository(
+          details: titleDetails,
+          tracked: true,
+          status: WatchStatus.inProgress,
+          progress: watchedEpisodes
+              .map(
+                (key) => RemoteEpisodeProgress(
+                  mediaId: titleDetails.id,
+                  seasonNumber: int.parse(key.split('_')[0]),
+                  episodeNumber: int.parse(key.split('_')[1]),
+                  isWatched: true,
+                  updatedAtMillis: 0,
+                ),
+              )
+              .toList(),
+          seasonEpisodes: {1: seasonEpisodes ?? titleSeasonEpisodes},
+        ),
+        media: titleMedia,
       ),
     );
   }
@@ -379,4 +459,136 @@ void main() {
       expect(find.textContaining('10/06/2025'), findsOneWidget);
     },
   );
+
+  testWidgets('swipe horizontal change entre À propos et Épisodes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Informations sur la série'), findsOneWidget);
+    expect(find.text('Saison 1'), findsNothing);
+
+    await tester.drag(
+      find.text('Informations sur la série'),
+      const Offset(-300, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saison 1'), findsOneWidget);
+    expect(find.text('Informations sur la série'), findsNothing);
+
+    await tester.drag(find.text('Saison 1'), const Offset(300, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Informations sur la série'), findsOneWidget);
+  });
+
+  testWidgets('une saison vide affiche un état vide explicite', (tester) async {
+    await tester.pumpWidget(buildTitlePage(seasonEpisodes: []));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saison 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aucun épisode chargé'), findsOneWidget);
+    expect(find.text('Réessayer'), findsOneWidget);
+  });
+
+  testWidgets('le raccourci cocher jusqu\'ici est plus visible', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage(watchedEpisodes: const {}));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saison 1'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.widgetWithText(FilledButton, "Cocher jusqu'ici"),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('la liste des épisodes utilise le nouveau toggle rond', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saison 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byIcon(Icons.check_rounded), findsWidgets);
+  });
+
+  testWidgets('la barre de progression de saison utilise une piste teintée', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+
+    final progress = tester.widget<LinearProgressIndicator>(
+      find.byKey(const ValueKey('season-progress-1')),
+    );
+    expect(progress.backgroundColor, isNot(equals(Colors.white)));
+  });
+}
+
+class _FakeMediaRepository extends MediaRepository {
+  _FakeMediaRepository({
+    required this.details,
+    required this.tracked,
+    required this.status,
+    required this.progress,
+    required this.seasonEpisodes,
+  }) : super(
+         TmdbApiClient(apiKey: ''),
+         TvdbApiClient(apiKey: ''),
+         WatchTrackerDatabase(),
+       );
+
+  final MediaDetails details;
+  final bool tracked;
+  final WatchStatus? status;
+  final List<RemoteEpisodeProgress> progress;
+  final Map<int, List<Episode>> seasonEpisodes;
+
+  @override
+  Future<MediaDetails> getTvDetails(int id) async => details;
+
+  @override
+  Future<void> prefetchSeasonEpisodes(MediaDetails details) async {}
+
+  @override
+  Future<bool> isInWatchlist(
+    int id,
+    MediaType type,
+    WatchCategory category,
+  ) async => tracked;
+
+  @override
+  Future<WatchStatus?> getWatchStatus(
+    int id,
+    MediaType type,
+    WatchCategory category,
+  ) async => status;
+
+  @override
+  Future<List<RemoteEpisodeProgress>> getEpisodeProgress(int mediaId) async =>
+      progress;
+
+  @override
+  Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async =>
+      seasonEpisodes[seasonNumber] ?? const [];
 }
