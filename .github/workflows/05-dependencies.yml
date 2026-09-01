@@ -19,21 +19,21 @@ jobs:
       - name: 📥 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.47.0'
           cache: true
-      
+       
       - name: 🔄 Check for updates
-        run: cd flutter_app && flutter pub upgrade --dry-run
-      
+        run: cd flutter_app && flutter pub upgrade --dry-run || true
+       
       - name: 📤 Apply updates
         id: update
         run: |
           cd flutter_app
           flutter pub upgrade
-          if git diff --quiet pubspec.lock; then
-            echo "updates=false" >> $GITHUB_OUTPUT
+          if [ -f pubspec.lock ] && git diff --quiet -- pubspec.lock; then
+            echo "updates=false" >> "$GITHUB_OUTPUT"
           else
-            echo "updates=true" >> $GITHUB_OUTPUT
+            echo "updates=true" >> "$GITHUB_OUTPUT"
           fi
       
       - name: 📝 Create PR (if updates)
@@ -66,27 +66,35 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: 📥 Install pip-audit
-        run: pip install pip-audit poetry pip-tools
-      
+      - name: 🐘 Install PostgreSQL build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev
+       
+      - name: 📥 Install pip tools
+        run: python -m pip install --upgrade pip setuptools wheel pip-audit poetry pip-tools
+       
       - name: 🔍 Check for outdated packages
         run: |
           cd server
-          pip list --outdated --format=json > outdated.json || true
+          python -m pip list --outdated --format=json > outdated.json || true
           cat outdated.json
-      
+       
       - name: 🔄 Update requirements
         id: update
         run: |
           cd server
-          pip install --upgrade pip setuptools wheel
-          pip-compile requirements.txt --upgrade --output-file=requirements-new.txt 2>&1 || true
-          
+          if ! python -m piptools compile requirements.txt --upgrade --output-file=requirements-new.txt; then
+            echo "pip-compile a échoué; aucun PR de mise à jour ne sera créé."
+            echo "updates=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if ! diff -q requirements.txt requirements-new.txt > /dev/null 2>&1; then
             mv requirements-new.txt requirements.txt
-            echo "updates=true" >> $GITHUB_OUTPUT
+            echo "updates=true" >> "$GITHUB_OUTPUT"
           else
-            echo "updates=false" >> $GITHUB_OUTPUT
+            echo "updates=false" >> "$GITHUB_OUTPUT"
           fi
       
       - name: 📝 Create PR (if updates)
