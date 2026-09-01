@@ -753,16 +753,12 @@ class _DetailsScreenState extends State<DetailsScreen> {
       List<Episode> seasonEpisodes =
           _episodesBySeason[season.seasonNumber] ?? season.episodes;
       if (seasonEpisodes.isEmpty && season.episodeCount > 0) {
-        try {
-          final fetched = await widget.repository.getSeasonEpisodes(
-            details.id,
-            season.seasonNumber,
-          );
-          _episodesBySeason[season.seasonNumber] = fetched;
-          seasonEpisodes = fetched;
-        } catch (_) {
-          continue;
-        }
+        final fetched = await widget.repository.getSeasonEpisodes(
+          details.id,
+          season.seasonNumber,
+        );
+        _episodesBySeason[season.seasonNumber] = fetched;
+        seasonEpisodes = fetched;
       }
       if (seasonEpisodes.isEmpty) continue;
       final orderedEpisodes = [...seasonEpisodes]
@@ -786,10 +782,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
     });
     try {
       final orderedSeasons = _orderedSeasons(details.seasons);
-      final nextEpisode = await _findNextEpisodeToWatch(
-        details,
-        orderedSeasons,
-      );
+      late final Episode? nextEpisode;
+      try {
+        nextEpisode = await _findNextEpisodeToWatch(details, orderedSeasons);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Impossible de charger les épisodes pour trouver le prochain: $e',
+            ),
+          ),
+        );
+        return;
+      }
       if (!mounted) return;
 
       if (nextEpisode == null) {

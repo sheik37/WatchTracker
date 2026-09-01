@@ -559,7 +559,7 @@ void main() {
   );
 
   testWidgets(
-    'bouton prochain épisode scrolle jusqu à un épisode plus bas dans la saison',
+    'bouton prochain épisode scrolle jusqu\'à un épisode plus bas dans la saison',
     (tester) async {
       final longSeasonEpisodes = List<Episode>.generate(
         20,
