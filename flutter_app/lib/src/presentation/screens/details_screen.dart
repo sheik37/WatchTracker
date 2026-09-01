@@ -37,17 +37,33 @@ class _DetailsScreenState extends State<DetailsScreen> {
   final ScrollController _scrollCtrl = ScrollController();
   final Map<int, List<Episode>> _episodesBySeason = {};
   double _tvSwipeDelta = 0;
+  int _nextEpisodeJumpToken = 0;
+  Episode? _nextEpisodeTarget;
+  bool _showExtendedNextEpisodeCta = true;
+  bool _navigatingToNextEpisode = false;
 
   @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScrollChanged);
     _load();
   }
 
   @override
   void dispose() {
+    _scrollCtrl.removeListener(_onScrollChanged);
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _onScrollChanged() {
+    if (!_scrollCtrl.hasClients) return;
+    final showExtended = _scrollCtrl.offset < 64;
+    if (showExtended != _showExtendedNextEpisodeCta && mounted) {
+      setState(() {
+        _showExtendedNextEpisodeCta = showExtended;
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -726,6 +742,148 @@ class _DetailsScreenState extends State<DetailsScreen> {
     _tvSwipeDelta = 0;
   }
 
+  String _episodeWatchKey(Episode episode) =>
+      '${episode.seasonNumber}_${episode.episodeNumber}';
+
+  Future<Episode?> _findNextEpisodeToWatch(
+    MediaDetails details,
+    List<Season> orderedSeasons,
+  ) async {
+    for (final season in orderedSeasons.where((s) => s.seasonNumber != 0)) {
+      List<Episode> seasonEpisodes =
+          _episodesBySeason[season.seasonNumber] ?? season.episodes;
+      if (seasonEpisodes.isEmpty && season.episodeCount > 0) {
+        try {
+          final fetched = await widget.repository.getSeasonEpisodes(
+            details.id,
+            season.seasonNumber,
+          );
+          _episodesBySeason[season.seasonNumber] = fetched;
+          seasonEpisodes = fetched;
+        } catch (_) {
+          continue;
+        }
+      }
+      if (seasonEpisodes.isEmpty) continue;
+      final orderedEpisodes = [...seasonEpisodes]
+        ..sort((a, b) => a.episodeNumber.compareTo(b.episodeNumber));
+      for (final episode in orderedEpisodes) {
+        if (!_isReleasedEpisode(episode)) continue;
+        if (_watchedEpisodes.contains(_episodeWatchKey(episode))) continue;
+        return episode;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _goToNextEpisode() async {
+    final details = _details;
+    if (details == null || details.mediaType != MediaType.tv) return;
+    if (_navigatingToNextEpisode) return;
+
+    setState(() {
+      _navigatingToNextEpisode = true;
+    });
+    try {
+      final orderedSeasons = _orderedSeasons(details.seasons);
+      final nextEpisode = await _findNextEpisodeToWatch(
+        details,
+        orderedSeasons,
+      );
+      if (!mounted) return;
+
+      if (nextEpisode == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Aucun prochain épisode à regarder.')),
+        );
+        return;
+      }
+
+      setState(() {
+        _tvTabDirection = 1;
+        _showEpisodes = true;
+        _nextEpisodeTarget = nextEpisode;
+        _nextEpisodeJumpToken++;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _navigatingToNextEpisode = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildNextEpisodeFab(bool isTV) {
+    if (!isTV) return const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.primaryContainer,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        key: const ValueKey('next-episode-fab'),
+        borderRadius: BorderRadius.circular(28),
+        onTap: _navigatingToNextEpisode ? null : _goToNextEpisode,
+        child: AnimatedContainer(
+          key: const ValueKey('next-episode-fab-container'),
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeInOutCubic,
+          height: 56,
+          width: _showExtendedNextEpisodeCta ? 186 : 56,
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Positioned(
+                left: 16,
+                child: _navigatingToNextEpisode
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: colorScheme.onPrimaryContainer,
+                        ),
+                      )
+                    : Icon(
+                        Icons.play_arrow_rounded,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+              ),
+              Positioned(
+                left: 44,
+                right: 16,
+                child: ClipRect(
+                  child: AnimatedAlign(
+                    alignment: Alignment.centerLeft,
+                    duration: const Duration(milliseconds: 380),
+                    curve: Curves.easeInOutCubic,
+                    widthFactor: _showExtendedNextEpisodeCta ? 1 : 0,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 320),
+                      curve: Curves.easeInOutCubic,
+                      opacity: _showExtendedNextEpisodeCta ? 1 : 0,
+                      child: Text(
+                        'Aller au prochain',
+                        key: const ValueKey('next-episode-fab-label'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTvTabContent(
     MediaDetails details,
     List<Season> orderedSeasons,
@@ -733,36 +891,23 @@ class _DetailsScreenState extends State<DetailsScreen> {
   ) {
     const aboutKey = ValueKey('tv-tab-about');
     const episodesKey = ValueKey('tv-tab-episodes');
-    final currentKey = _showEpisodes ? episodesKey : aboutKey;
     final direction = _tvTabDirection.toDouble();
 
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
+      duration: const Duration(milliseconds: 220),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeOutCubic,
-      layoutBuilder: (currentChild, previousChildren) {
-        final children = <Widget>[...previousChildren];
-        if (currentChild != null) {
-          children.add(currentChild);
-        }
-        return ClipRect(
-          child: Stack(alignment: Alignment.topCenter, children: children),
-        );
-      },
+      layoutBuilder: (currentChild, _) =>
+          currentChild ?? const SizedBox.shrink(),
       transitionBuilder: (child, animation) {
-        final isIncoming = child.key == currentKey;
-        final offsetTween = isIncoming
-            ? Tween<Offset>(
-                begin: Offset(direction * 0.18, 0),
-                end: Offset.zero,
-              )
-            : Tween<Offset>(
-                begin: Offset(-direction * 0.18, 0),
-                end: Offset.zero,
-              );
-        return SlideTransition(
-          position: offsetTween.animate(animation),
-          child: child,
+        return ClipRect(
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: Offset(direction * 0.18, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
         );
       },
       child: _showEpisodes
@@ -787,6 +932,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       onMarkEpisodeUpTo: _markEpisodeUpTo,
                       onOpenEpisode: _openEpisodeDetailPage,
                       onEpisodesLoaded: _onSeasonEpisodesLoaded,
+                      jumpRequestToken: _nextEpisodeJumpToken,
+                      jumpTargetEpisode: _nextEpisodeTarget,
                     ),
                 ],
               ),
@@ -828,6 +975,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
               onAdd: _toggleWatchlist,
             )
           : null,
+      floatingActionButton: _buildNextEpisodeFab(isTV),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onHorizontalDragStart: isTV ? (_) => _tvSwipeDelta = 0 : null,
@@ -1484,6 +1633,8 @@ class _SeasonSection extends StatefulWidget {
     required this.onMarkEpisodeUpTo,
     required this.onOpenEpisode,
     required this.onEpisodesLoaded,
+    required this.jumpRequestToken,
+    required this.jumpTargetEpisode,
   });
 
   final int mediaId;
@@ -1499,6 +1650,8 @@ class _SeasonSection extends StatefulWidget {
   final Future<void> Function(Episode) onOpenEpisode;
   final void Function(int seasonNumber, List<Episode> episodes)
   onEpisodesLoaded;
+  final int jumpRequestToken;
+  final Episode? jumpTargetEpisode;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -1509,6 +1662,27 @@ class _SeasonSectionState extends State<_SeasonSection> {
   bool _loadingEpisodes = false;
   List<Episode> _episodes = [];
   final ScrollController _episodesScrollCtrl = ScrollController();
+  int _lastHandledJumpToken = 0;
+  final Map<String, GlobalKey> _episodeTileKeys = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _maybeHandleJumpToEpisode();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _SeasonSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.jumpRequestToken != oldWidget.jumpRequestToken ||
+        widget.jumpTargetEpisode != oldWidget.jumpTargetEpisode) {
+      _maybeHandleJumpToEpisode();
+    }
+  }
 
   @override
   void dispose() {
@@ -1516,8 +1690,103 @@ class _SeasonSectionState extends State<_SeasonSection> {
     super.dispose();
   }
 
+  Future<void> _maybeHandleJumpToEpisode() async {
+    final target = widget.jumpTargetEpisode;
+    if (target == null) return;
+    if (target.seasonNumber != widget.season.seasonNumber) return;
+    if (widget.jumpRequestToken == 0 ||
+        widget.jumpRequestToken == _lastHandledJumpToken) {
+      return;
+    }
+
+    _lastHandledJumpToken = widget.jumpRequestToken;
+
+    await Scrollable.ensureVisible(
+      context,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+
+    if (!_expanded) {
+      setState(() {
+        _expanded = true;
+      });
+    }
+
+    await _loadEpisodesIfNeeded();
+    if (!mounted) return;
+
+    final index = _episodes.indexWhere(
+      (ep) =>
+          ep.seasonNumber == target.seasonNumber &&
+          ep.episodeNumber == target.episodeNumber,
+    );
+    if (index < 0) return;
+
+    final targetKey = _episodeTileKey(target);
+    final roughOffset = index * 108.0;
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+
+      final targetContext = targetKey.currentContext;
+      if (targetContext != null && targetContext.mounted) {
+        await Scrollable.ensureVisible(
+          targetContext,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+        if (!targetContext.mounted) return;
+        if (!mounted || !widget.parentScrollController.hasClients) return;
+        final renderBox = targetContext.findRenderObject() as RenderBox?;
+        if (renderBox == null || !renderBox.attached) return;
+        final view = View.of(targetContext);
+        final screenHeight = view.physicalSize.height / view.devicePixelRatio;
+        final itemCenterY =
+            renderBox.localToGlobal(Offset.zero).dy +
+            (renderBox.size.height / 2);
+        final desiredCenterY = screenHeight / 2;
+        final delta = itemCenterY - desiredCenterY;
+        if (delta.abs() > 8) {
+          final targetOffset =
+              (widget.parentScrollController.position.pixels + delta)
+                  .clamp(
+                    0.0,
+                    widget.parentScrollController.position.maxScrollExtent,
+                  )
+                  .toDouble();
+          await widget.parentScrollController.animateTo(
+            targetOffset,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+          );
+        }
+        return;
+      }
+
+      if (_episodesScrollCtrl.hasClients) {
+        final nudgedOffset = (roughOffset + (attempt * 96))
+            .clamp(0.0, _episodesScrollCtrl.position.maxScrollExtent)
+            .toDouble();
+        _episodesScrollCtrl.jumpTo(nudgedOffset);
+      }
+    }
+  }
+
+  String _episodeWatchKey(Episode ep) =>
+      '${ep.seasonNumber}_${ep.episodeNumber}';
+
+  GlobalKey _episodeTileKey(Episode ep) => _episodeTileKeys.putIfAbsent(
+    _episodeWatchKey(ep),
+    () =>
+        GlobalKey(debugLabel: 'episode-${ep.seasonNumber}-${ep.episodeNumber}'),
+  );
+
   bool _isWatched(Episode ep) =>
-      widget.watchedEpisodes.contains('${ep.seasonNumber}_${ep.episodeNumber}');
+      widget.watchedEpisodes.contains(_episodeWatchKey(ep));
 
   bool get _isSpecialSeason => widget.season.seasonNumber == 0;
 
@@ -1905,6 +2174,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                             !_isWatched(ep) &&
                             (_isFutureEpisodeRelease(ep) || ep.airDate == null);
                         return Padding(
+                          key: _episodeTileKey(ep),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 6,

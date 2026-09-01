@@ -487,6 +487,113 @@ void main() {
     expect(find.text('Informations sur la série'), findsOneWidget);
   });
 
+  testWidgets('changement d’onglet sans superposition temporaire des vues', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('tv-tab-about')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tv-tab-episodes')), findsNothing);
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pump(const Duration(milliseconds: 40));
+
+    expect(find.byKey(const ValueKey('tv-tab-about')), findsNothing);
+    expect(find.byKey(const ValueKey('tv-tab-episodes')), findsOneWidget);
+  });
+
+  testWidgets('bouton prochain épisode se compacte après scroll', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2000, 700);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(buildTitlePage());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('next-episode-fab')), findsOneWidget);
+    expect(
+      tester
+              .getSize(find.byKey(const ValueKey('next-episode-fab-container')))
+              .width >
+          150,
+      isTrue,
+    );
+
+    await tester.fling(
+      find.byType(CustomScrollView),
+      const Offset(0, -900),
+      1800,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('next-episode-fab')), findsOneWidget);
+    expect(
+      tester
+              .getSize(find.byKey(const ValueKey('next-episode-fab-container')))
+              .width <
+          70,
+      isTrue,
+    );
+  });
+
+  testWidgets(
+    'bouton prochain épisode ouvre Episodes et positionne la saison cible',
+    (tester) async {
+      await tester.pumpWidget(buildTitlePage());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Informations sur la série'), findsOneWidget);
+      expect(find.textContaining('S01 | E02'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('next-episode-fab')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saison 1'), findsOneWidget);
+      expect(find.textContaining('S01 | E02'), findsOneWidget);
+      expect(find.text('Informations sur la série'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'bouton prochain épisode scrolle jusqu à un épisode plus bas dans la saison',
+    (tester) async {
+      final longSeasonEpisodes = List<Episode>.generate(
+        20,
+        (index) => Episode(
+          id: 300 + index,
+          name: 'Episode ${index + 1}',
+          overview: 'Description ${index + 1}',
+          episodeNumber: index + 1,
+          seasonNumber: 1,
+          stillPath: null,
+          airDate: '2024-01-01',
+          runtime: 42,
+        ),
+      );
+
+      await tester.pumpWidget(
+        buildTitlePage(
+          watchedEpisodes: {for (var i = 1; i <= 7; i++) '1_$i'},
+          seasonEpisodes: longSeasonEpisodes,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('next-episode-fab')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('S01 | E08'), findsOneWidget);
+      final episodeCenter = tester.getCenter(find.textContaining('S01 | E08'));
+      final viewportCenter =
+          tester.view.physicalSize.height / tester.view.devicePixelRatio / 2;
+      expect((episodeCenter.dy - viewportCenter).abs(), lessThan(170));
+    },
+  );
+
   testWidgets('une saison vide affiche un état vide explicite', (tester) async {
     await tester.pumpWidget(buildTitlePage(seasonEpisodes: []));
     await tester.pumpAndSettle();
