@@ -1,0 +1,33 @@
+flutter:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'flutter_app/**'
+
+backend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'server/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'BD/**'
+          - 'server/sql/**'
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.gitignore'
+          - '.gitattributes'
+          - '*.yml'
+          - '*.yaml'
