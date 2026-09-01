@@ -1,0 +1,21 @@
+flutter:
+  - 'flutter_app/**'
+
+backend:
+  - 'server/**'
+
+ci:
+  - '.github/**'
+
+docs:
+  - '**/*.md'
+
+database:
+  - 'BD/**'
+  - 'server/sql/**'
+
+config:
+  - '.gitignore'
+  - '.gitattributes'
+  - '*.yml'
+  - '*.yaml'

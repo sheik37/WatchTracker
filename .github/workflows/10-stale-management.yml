@@ -1,0 +1,33 @@
+name: "🧹 Stale management"
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Close stale issues and PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale items
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 30
+          days-before-close: 7
+          stale-issue-message: |
+            Cette issue est inactive depuis 30 jours. Elle sera fermée dans 7 jours si aucun mouvement n'est fait.
+          stale-pr-message: |
+            Cette pull request est inactive depuis 30 jours. Elle sera fermée dans 7 jours si aucun mouvement n'est fait.
+          close-issue-message: |
+            Issue fermée automatiquement car elle est restée inactive.
+          close-pr-message: |
+            PR fermée automatiquement car elle est restée inactive.
+          exempt-issue-labels: bug,security,pinned,keep-open
+          exempt-pr-labels: security,pinned,keep-open
+          remove-stale-when-updated: true
