@@ -1,21 +1,33 @@
 flutter:
-  - 'flutter_app/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'flutter_app/**'
 
 backend:
-  - 'server/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'server/**'
 
 ci:
-  - '.github/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
 
 docs:
-  - '**/*.md'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
 
 database:
-  - 'BD/**'
-  - 'server/sql/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'BD/**'
+          - 'server/sql/**'
 
 config:
-  - '.gitignore'
-  - '.gitattributes'
-  - '*.yml'
-  - '*.yaml'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.gitignore'
+          - '.gitattributes'
+          - '*.yml'
+          - '*.yaml'
