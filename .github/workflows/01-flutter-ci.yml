@@ -1,4 +1,4 @@
-name: 📱 CI Flutter
+﻿name: 📱 CI Flutter
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
     name: 🔍 Analyze & Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 📥 Setup Flutter
         uses: subosito/flutter-action@v2
@@ -44,7 +44,7 @@ jobs:
     name: 🧪 Unit & Widget Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 📥 Setup Flutter
         uses: subosito/flutter-action@v2
@@ -95,7 +95,7 @@ jobs:
           path: flutter_app/coverage/lcov.info
        
       - name: 📊 Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./flutter_app/coverage/lcov.info
           flags: flutter

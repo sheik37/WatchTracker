@@ -1,4 +1,4 @@
-name: 🔄 Dependency Updates
+﻿name: 🔄 Dependency Updates
 
 on:
   schedule:
@@ -18,7 +18,7 @@ jobs:
     name: 🚀 Flutter Dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 📥 Setup Flutter
         uses: subosito/flutter-action@v2
@@ -74,10 +74,10 @@ jobs:
     name: 🐍 Python Dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       
@@ -147,10 +147,10 @@ jobs:
     name: 🔐 Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       
