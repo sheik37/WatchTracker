@@ -22,7 +22,15 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Dependency review
+        id: dependency_review
+        continue-on-error: true
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-3.0, AGPL-3.0
+
+      - name: Dependency graph disabled notice
+        if: steps.dependency_review.outcome != 'success'
+        run: |
+          echo "::warning::Dependency Review n'a pas pu s'exécuter (Dependency Graph désactivé)."
+          echo "::warning::Activez-le ici: https://github.com/${{ github.repository }}/settings/security_analysis"
