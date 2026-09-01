@@ -1,4 +1,4 @@
-name: ✅ Format & Commits
+﻿name: ✅ Format & Commits
 
 on:
   push:
@@ -6,12 +6,19 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   line_endings:
     name: 📄 Line Ending Enforcement
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
@@ -32,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       
@@ -69,7 +76,7 @@ jobs:
     name: 🎯 Trailing Whitespace
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 🔍 Check trailing whitespace
         run: |
@@ -84,7 +91,7 @@ jobs:
     name: 📦 Large File Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: 🔍 Check for large files
         run: |
