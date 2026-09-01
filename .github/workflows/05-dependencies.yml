@@ -37,23 +37,34 @@ jobs:
           fi
       
       - name: 📝 Create PR (if updates)
+        id: pr
         if: steps.update.outputs.updates == 'true'
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
           commit-message: 'chore(flutter): mettre à jour les dépendances'
           title: '🔄 Mise à jour automatique - dépendances Flutter'
           body: |
             ## 🔄 Mises à jour disponibles
-            
+             
             Mises à jour des dépendances Flutter détectées.
-            
+             
             ```
             ${{ steps.update.outputs.updates }}
             ```
-            
+             
             Veuillez vérifier les changements et tester avant fusion.
           branch: chore/flutter-deps-update
           delete-branch: true
+
+      - name: ℹ️ PR creation status
+        if: steps.update.outputs.updates == 'true'
+        run: |
+          if [ "${{ steps.pr.outcome }}" = "success" ]; then
+            echo "Pull request créé avec succès."
+          else
+            echo "Création de PR ignorée: GitHub Actions n'est pas autorisé à créer des pull requests."
+          fi
 
   python_updates:
     name: 🐍 Python Dependencies
@@ -98,24 +109,35 @@ jobs:
           fi
       
       - name: 📝 Create PR (if updates)
+        id: pr
         if: steps.update.outputs.updates == 'true'
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
           commit-message: 'chore(backend): mettre à jour les dépendances Python'
           title: '🔄 Mise à jour automatique - dépendances Python'
           body: |
             ## 🔄 Mises à jour disponibles
-            
+             
             Mises à jour des dépendances Python détectées.
-            
+             
             Veuillez vérifier les changements, exécuter les tests et valider avant fusion.
-            
+             
             ### À vérifier:
             - ✅ Tests passent (`pytest tests/`)
             - ✅ Aucune incompatibilité connue
             - ✅ Versions de sécurité critiques
           branch: chore/python-deps-update
           delete-branch: true
+
+      - name: ℹ️ PR creation status
+        if: steps.update.outputs.updates == 'true'
+        run: |
+          if [ "${{ steps.pr.outcome }}" = "success" ]; then
+            echo "Pull request créé avec succès."
+          else
+            echo "Création de PR ignorée: GitHub Actions n'est pas autorisé à créer des pull requests."
+          fi
 
   security_audit:
     name: 🔐 Security Audit
