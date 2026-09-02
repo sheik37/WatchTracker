@@ -272,6 +272,40 @@ class MediaRepository {
     );
   }
 
+  Future<int?> getMovieFirstWatchedAt(int mediaId) {
+    return _database.firstMovieWatchAt(mediaId);
+  }
+
+  Future<int> getMovieViewCount(int mediaId) {
+    return _database.countMovieWatchEvents(mediaId);
+  }
+
+  Future<void> markMovieWatched(
+    Media media,
+    WatchCategory category, {
+    bool rewatch = false,
+    int? watchedAtMillis,
+  }) async {
+    final status = await getWatchStatus(media.id, media.mediaType, category);
+    if (!rewatch && status != WatchStatus.watched) {
+      await _database.addMovieWatchEvent(
+        mediaId: media.id,
+        watchedAtMillis: watchedAtMillis,
+      );
+    } else if (rewatch) {
+      await _database.addMovieWatchEvent(
+        mediaId: media.id,
+        watchedAtMillis: watchedAtMillis,
+      );
+    }
+    await updateWatchStatus(media, category, WatchStatus.watched);
+  }
+
+  Future<void> markMovieUnwatched(Media media, WatchCategory category) async {
+    await _database.clearMovieWatchEvents(media.id);
+    await updateWatchStatus(media, category, WatchStatus.notWatched);
+  }
+
   Future<MediaDetails> getMovieDetails(int id) => _tmdbApi.getMovieDetails(id);
   Future<MediaDetails> getTvDetailsFast(int id) => _tmdbApi.getTvDetails(id);
 
@@ -404,6 +438,119 @@ class MediaRepository {
       );
     }
     _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeWatched({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    required bool rewatch,
+    int? watchedAtMillis,
+  }) async {
+    if (rewatch) {
+      await _database.addEpisodeWatchEvent(
+        mediaId: mediaId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+    } else {
+      await _database.markEpisodeWatchedIfNeeded(
+        mediaId: mediaId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+    }
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeUnwatched({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    await _database.clearEpisodeWatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeBatch({
+    required int mediaId,
+    required List<RemoteEpisodeProgress> updates,
+    required bool includeAlreadyWatchedForMarked,
+  }) async {
+    if (updates.isEmpty) return;
+    final watchedUpdates = updates
+        .where((u) => u.isWatched)
+        .map(
+          (u) => <String, int>{
+            'season_number': u.seasonNumber,
+            'episode_number': u.episodeNumber,
+          },
+        )
+        .toList();
+    final unwatchedUpdates = updates
+        .where((u) => !u.isWatched)
+        .map(
+          (u) => <String, int>{
+            'season_number': u.seasonNumber,
+            'episode_number': u.episodeNumber,
+          },
+        )
+        .toList();
+    final sharedTs = updates.first.updatedAtMillis;
+    if (watchedUpdates.isNotEmpty) {
+      await _database.addEpisodeWatchEventsBatch(
+        mediaId: mediaId,
+        episodes: watchedUpdates,
+        watchedAtMillis: sharedTs,
+        includeAlreadyWatched: includeAlreadyWatchedForMarked,
+      );
+    }
+    if (unwatchedUpdates.isNotEmpty) {
+      await _database.clearEpisodeWatchEventsBatch(
+        mediaId: mediaId,
+        episodes: unwatchedUpdates,
+      );
+    }
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<int> getEpisodeViewCount({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) {
+    return _database.countEpisodeWatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
   }
 
   Future<void> updateEpisodeProgressBatch({

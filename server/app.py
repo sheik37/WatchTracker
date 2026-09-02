@@ -46,6 +46,9 @@ from crud import (
     register_rate_limit_success,
     register_user,
     replace_episode_progress,
+    rewatch_episode_progress,
+    rewatch_episode_season,
+    rewatch_movie,
     reserve_email_delivery_slot,
     reset_password_with_token,
     revoke_auth_token,
@@ -74,6 +77,7 @@ from schemas import (
     EpisodeProgressItemIn,
     HealthResponse,
     SyncSnapshotOut,
+    SeasonRewatchIn,
     WatchlistItemIn,
     WatchlistStatusUpdate,
     WatchlistTotalUpdate,
@@ -1149,6 +1153,22 @@ def patch_watch_status(
     return row
 
 
+@app.post("/watchlist/{media_id}/{media_type}/{content_category}/rewatch", status_code=204)
+def post_watchlist_rewatch(
+    media_id: int,
+    media_type: str,
+    content_category: str,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    if media_type != "movie":
+        raise HTTPException(
+            status_code=400, detail="Rewatch endpoint is only available for movies"
+        )
+    ok = rewatch_movie(user_id, media_id, media_type, content_category)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+
+
 @app.patch("/watchlist/{media_id}/{media_type}/{content_category}/total-episodes")
 def patch_watch_total(
     media_id: int,
@@ -1189,6 +1209,36 @@ def put_episode_progress(
     user_id: int = Depends(get_current_user_id),
 ) -> None:
     replace_episode_progress(user_id, media_id, items)
+
+
+@app.post(
+    "/episode-progress/{media_id}/{season_number}/{episode_number}/rewatch",
+    status_code=204,
+)
+def post_episode_rewatch(
+    media_id: int,
+    season_number: int,
+    episode_number: int,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    if season_number < 0 or episode_number < 1:
+        raise HTTPException(status_code=400, detail="Invalid season/episode number")
+    rewatch_episode_progress(user_id, media_id, season_number, episode_number)
+
+
+@app.post("/episode-progress/{media_id}/rewatch-season", status_code=204)
+def post_episode_rewatch_season(
+    media_id: int,
+    payload: SeasonRewatchIn,
+    user_id: int = Depends(get_current_user_id),
+) -> None:
+    if payload.season_number < 0:
+        raise HTTPException(status_code=400, detail="Invalid season number")
+    if any(number < 1 for number in payload.episode_numbers):
+        raise HTTPException(status_code=400, detail="Invalid episode number")
+    rewatch_episode_season(
+        user_id, media_id, payload.season_number, payload.episode_numbers
+    )
 
 
 @app.delete(

@@ -5,8 +5,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from psycopg2.extras import execute_values
-
 from db import cursor
 from schemas import (
     EpisodeProgressItemIn,
@@ -942,6 +940,40 @@ def update_watch_status(
     with cursor() as cur:
         cur.execute(
             """
+            SELECT content_status
+            FROM watchlist
+            WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (user_id, media_id, media_type, content_category),
+        )
+        existing = cur.fetchone()
+        if existing is None:
+            return None
+        if media_type == "movie":
+            if content_status == "not_watched":
+                cur.execute(
+                    """
+                    DELETE FROM movie_watch_events
+                    WHERE user_id = %s AND media_id = %s
+                    """,
+                    (user_id, media_id),
+                )
+            elif (
+                content_status == "watched"
+                and (existing["content_status"] or "") != "watched"
+            ):
+                watched_at = datetime.now(timezone.utc)
+                cur.execute(
+                    """
+                    INSERT INTO movie_watch_events (user_id, media_id, watched_at, created_at)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (user_id, media_id, watched_at, watched_at),
+                )
+        cur.execute(
+            """
             UPDATE watchlist
             SET content_status = %s, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
@@ -951,6 +983,44 @@ def update_watch_status(
         )
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+def rewatch_movie(
+    user_id: int, media_id: int, media_type: str, content_category: str
+) -> bool:
+    if media_type != "movie":
+        return False
+    with cursor() as cur:
+        cur.execute(
+            """
+            SELECT id
+            FROM watchlist
+            WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (user_id, media_id, media_type, content_category),
+        )
+        existing = cur.fetchone()
+        if existing is None:
+            return False
+        watched_at = datetime.now(timezone.utc)
+        cur.execute(
+            """
+            INSERT INTO movie_watch_events (user_id, media_id, watched_at, created_at)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (user_id, media_id, watched_at, watched_at),
+        )
+        cur.execute(
+            """
+            UPDATE watchlist
+            SET content_status = 'watched', updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s AND id = %s AND media_type = %s AND content_category = %s
+            """,
+            (user_id, media_id, media_type, content_category),
+        )
+        return True
 
 
 def update_watch_total(
@@ -1092,21 +1162,145 @@ def replace_episode_progress(
 ) -> None:
     if not items:
         return
-    values = [
-        (user_id, media_id, item.season_number, item.episode_number, item.is_watched)
-        for item in items
-    ]
     with cursor() as cur:
-        execute_values(
+        for item in items:
+            if item.is_watched:
+                _set_episode_watched(
+                    cur,
+                    user_id=user_id,
+                    media_id=media_id,
+                    season_number=item.season_number,
+                    episode_number=item.episode_number,
+                    allow_rewatch=False,
+                )
+            else:
+                _set_episode_unwatched(
+                    cur,
+                    user_id=user_id,
+                    media_id=media_id,
+                    season_number=item.season_number,
+                    episode_number=item.episode_number,
+                )
+
+
+def rewatch_episode_progress(
+    user_id: int,
+    media_id: int,
+    season_number: int,
+    episode_number: int,
+) -> None:
+    with cursor() as cur:
+        _set_episode_watched(
             cur,
-            """
-            INSERT INTO episode_progress (user_id, media_id, season_number, episode_number, is_watched)
-            VALUES %s
-            ON CONFLICT (user_id, media_id, season_number, episode_number)
-            DO UPDATE SET is_watched = EXCLUDED.is_watched, updated_at = CURRENT_TIMESTAMP
-            """,
-            values,
+            user_id=user_id,
+            media_id=media_id,
+            season_number=season_number,
+            episode_number=episode_number,
+            allow_rewatch=True,
         )
+
+
+def rewatch_episode_season(
+    user_id: int,
+    media_id: int,
+    season_number: int,
+    episode_numbers: list[int],
+) -> None:
+    unique_numbers = sorted({n for n in episode_numbers if n > 0})
+    if not unique_numbers:
+        return
+    with cursor() as cur:
+        for episode_number in unique_numbers:
+            _set_episode_watched(
+                cur,
+                user_id=user_id,
+                media_id=media_id,
+                season_number=season_number,
+                episode_number=episode_number,
+                allow_rewatch=True,
+            )
+
+
+def _set_episode_watched(
+    cur,
+    *,
+    user_id: int,
+    media_id: int,
+    season_number: int,
+    episode_number: int,
+    allow_rewatch: bool,
+    watched_at: Optional[datetime] = None,
+) -> None:
+    event_at = watched_at or datetime.now(timezone.utc)
+    cur.execute(
+        """
+        SELECT is_watched, updated_at
+        FROM episode_progress
+        WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (user_id, media_id, season_number, episode_number),
+    )
+    row = cur.fetchone()
+    already_watched = bool(row and row["is_watched"])
+    if already_watched and not allow_rewatch:
+        return
+    first_watched_at = row["updated_at"] if already_watched else event_at
+    cur.execute(
+        """
+        INSERT INTO episode_watch_events (
+            user_id, media_id, season_number, episode_number, watched_at, created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (user_id, media_id, season_number, episode_number, event_at, event_at),
+    )
+    cur.execute(
+        """
+        DELETE FROM episode_progress_tombstones
+        WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
+        """,
+        (user_id, media_id, season_number, episode_number),
+    )
+    cur.execute(
+        """
+        INSERT INTO episode_progress (
+            user_id, media_id, season_number, episode_number, is_watched, updated_at
+        )
+        VALUES (%s, %s, %s, %s, TRUE, %s)
+        ON CONFLICT (user_id, media_id, season_number, episode_number)
+        DO UPDATE SET
+            is_watched = TRUE,
+            updated_at = LEAST(episode_progress.updated_at, EXCLUDED.updated_at)
+        """,
+        (user_id, media_id, season_number, episode_number, first_watched_at),
+    )
+
+
+def _set_episode_unwatched(
+    cur, *, user_id: int, media_id: int, season_number: int, episode_number: int
+) -> None:
+    cur.execute(
+        """
+        DELETE FROM episode_watch_events
+        WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
+        """,
+        (user_id, media_id, season_number, episode_number),
+    )
+    cur.execute(
+        """
+        INSERT INTO episode_progress (
+            user_id, media_id, season_number, episode_number, is_watched, updated_at
+        )
+        VALUES (%s, %s, %s, %s, FALSE, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, media_id, season_number, episode_number)
+        DO UPDATE SET
+            is_watched = FALSE,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, media_id, season_number, episode_number),
+    )
 
 
 def delete_episode_progress(
@@ -1122,6 +1316,13 @@ def delete_episode_progress(
             VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT (user_id, media_id, season_number, episode_number)
             DO UPDATE SET deleted_at = EXCLUDED.deleted_at
+            """,
+            (user_id, media_id, season_number, episode_number),
+        )
+        cur.execute(
+            """
+            DELETE FROM episode_watch_events
+            WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
             """,
             (user_id, media_id, season_number, episode_number),
         )

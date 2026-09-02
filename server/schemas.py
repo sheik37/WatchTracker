@@ -27,6 +27,11 @@ class EpisodeProgressItemIn(BaseModel):
     is_watched: bool
 
 
+class SeasonRewatchIn(BaseModel):
+    season_number: int = Field(ge=0)
+    episode_numbers: list[int] = Field(min_length=1)
+
+
 class HealthResponse(BaseModel):
     status: str
 

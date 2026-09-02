@@ -11,7 +11,7 @@ class WatchTrackerDatabase {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       path.join(dbPath, 'watchtracker.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE watchlist(
@@ -35,6 +35,24 @@ class WatchTrackerDatabase {
             is_watched INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY(media_id, season_number, episode_number)
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE episode_watch_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_id INTEGER NOT NULL,
+            season_number INTEGER NOT NULL,
+            episode_number INTEGER NOT NULL,
+            watched_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE movie_watch_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_id INTEGER NOT NULL,
+            watched_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
           )
         ''');
         await db.execute('''
@@ -96,6 +114,72 @@ class WatchTrackerDatabase {
               value INTEGER NOT NULL
             )
           ''');
+        }
+        if (oldVersion < 4) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS episode_watch_events(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              media_id INTEGER NOT NULL,
+              season_number INTEGER NOT NULL,
+              episode_number INTEGER NOT NULL,
+              watched_at INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS movie_watch_events(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              media_id INTEGER NOT NULL,
+              watched_at INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+
+          final watchedRows = await db.query(
+            'episode_progress',
+            columns: <String>[
+              'media_id',
+              'season_number',
+              'episode_number',
+              'is_watched',
+              'updated_at',
+            ],
+            where: 'is_watched = 1',
+          );
+          for (final row in watchedRows) {
+            await db.insert('episode_watch_events', <String, Object?>{
+              'media_id': row['media_id'],
+              'season_number': row['season_number'],
+              'episode_number': row['episode_number'],
+              'watched_at': row['updated_at'],
+              'created_at': row['updated_at'],
+            });
+          }
+
+          final watchedMovies = await db.query(
+            'watchlist',
+            columns: <String>[
+              'id',
+              'media_type',
+              'content_status',
+              'updated_at',
+            ],
+            where: 'media_type = ? AND content_status = ?',
+            whereArgs: <Object>[
+              MediaType.movie.value,
+              WatchStatus.watched.value,
+            ],
+          );
+          for (final row in watchedMovies) {
+            final watchedAt =
+                (row['updated_at'] as num?)?.toInt() ??
+                DateTime.now().millisecondsSinceEpoch;
+            await db.insert('movie_watch_events', <String, Object?>{
+              'media_id': row['id'],
+              'watched_at': watchedAt,
+              'created_at': watchedAt,
+            });
+          }
         }
       },
     );
@@ -368,10 +452,268 @@ class WatchTrackerDatabase {
     });
   }
 
+  Future<void> addEpisodeWatchEvent({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    int? watchedAtMillis,
+  }) async {
+    final db = await database;
+    final now = watchedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    await db.transaction((txn) async {
+      final current = await _episodeProgressRow(
+        txn,
+        mediaId: mediaId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+      );
+      final isWatched = (current?['is_watched'] as num?)?.toInt() == 1;
+      final firstWatchedAt = isWatched
+          ? (current?['updated_at'] as num?)?.toInt() ?? now
+          : now;
+      await txn.insert('episode_watch_events', <String, Object?>{
+        'media_id': mediaId,
+        'season_number': seasonNumber,
+        'episode_number': episodeNumber,
+        'watched_at': now,
+        'created_at': now,
+      });
+      await txn.insert('episode_progress', <String, Object?>{
+        'media_id': mediaId,
+        'season_number': seasonNumber,
+        'episode_number': episodeNumber,
+        'is_watched': 1,
+        'updated_at': firstWatchedAt,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.delete(
+        'episode_progress_tombstones',
+        where: 'media_id = ? AND season_number = ? AND episode_number = ?',
+        whereArgs: <Object>[mediaId, seasonNumber, episodeNumber],
+      );
+    });
+  }
+
+  Future<void> markEpisodeWatchedIfNeeded({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    int? watchedAtMillis,
+  }) async {
+    final db = await database;
+    final current = await _episodeProgressRow(
+      db,
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+    final isWatched = (current?['is_watched'] as num?)?.toInt() == 1;
+    if (isWatched) return;
+    await addEpisodeWatchEvent(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      watchedAtMillis: watchedAtMillis,
+    );
+  }
+
+  Future<void> clearEpisodeWatchEvents({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    int? updatedAtMillis,
+  }) async {
+    final db = await database;
+    final now = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'episode_watch_events',
+        where: 'media_id = ? AND season_number = ? AND episode_number = ?',
+        whereArgs: <Object>[mediaId, seasonNumber, episodeNumber],
+      );
+      await txn.insert('episode_progress', <String, Object?>{
+        'media_id': mediaId,
+        'season_number': seasonNumber,
+        'episode_number': episodeNumber,
+        'is_watched': 0,
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  Future<void> addEpisodeWatchEventsBatch({
+    required int mediaId,
+    required List<Map<String, int>> episodes,
+    int? watchedAtMillis,
+    required bool includeAlreadyWatched,
+  }) async {
+    if (episodes.isEmpty) return;
+    final db = await database;
+    final now = watchedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    await db.transaction((txn) async {
+      for (final episode in episodes) {
+        final seasonNumber = episode['season_number']!;
+        final episodeNumber = episode['episode_number']!;
+        final current = await _episodeProgressRow(
+          txn,
+          mediaId: mediaId,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber,
+        );
+        final isWatched = (current?['is_watched'] as num?)?.toInt() == 1;
+        if (isWatched && !includeAlreadyWatched) {
+          continue;
+        }
+        final firstWatchedAt = isWatched
+            ? (current?['updated_at'] as num?)?.toInt() ?? now
+            : now;
+        await txn.insert('episode_watch_events', <String, Object?>{
+          'media_id': mediaId,
+          'season_number': seasonNumber,
+          'episode_number': episodeNumber,
+          'watched_at': now,
+          'created_at': now,
+        });
+        await txn.insert('episode_progress', <String, Object?>{
+          'media_id': mediaId,
+          'season_number': seasonNumber,
+          'episode_number': episodeNumber,
+          'is_watched': 1,
+          'updated_at': firstWatchedAt,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.delete(
+          'episode_progress_tombstones',
+          where: 'media_id = ? AND season_number = ? AND episode_number = ?',
+          whereArgs: <Object>[mediaId, seasonNumber, episodeNumber],
+        );
+      }
+    });
+  }
+
+  Future<void> clearEpisodeWatchEventsBatch({
+    required int mediaId,
+    required List<Map<String, int>> episodes,
+    int? updatedAtMillis,
+  }) async {
+    if (episodes.isEmpty) return;
+    final db = await database;
+    final now = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    await db.transaction((txn) async {
+      for (final episode in episodes) {
+        final seasonNumber = episode['season_number']!;
+        final episodeNumber = episode['episode_number']!;
+        await txn.delete(
+          'episode_watch_events',
+          where: 'media_id = ? AND season_number = ? AND episode_number = ?',
+          whereArgs: <Object>[mediaId, seasonNumber, episodeNumber],
+        );
+        await txn.insert('episode_progress', <String, Object?>{
+          'media_id': mediaId,
+          'season_number': seasonNumber,
+          'episode_number': episodeNumber,
+          'is_watched': 0,
+          'updated_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  Future<int> countEpisodeWatchEvents({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS c
+      FROM episode_watch_events
+      WHERE media_id = ? AND season_number = ? AND episode_number = ?
+      ''',
+      <Object>[mediaId, seasonNumber, episodeNumber],
+    );
+    return (rows.first['c'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int?> firstEpisodeWatchAt({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT MIN(watched_at) AS first_watched_at
+      FROM episode_watch_events
+      WHERE media_id = ? AND season_number = ? AND episode_number = ?
+      ''',
+      <Object>[mediaId, seasonNumber, episodeNumber],
+    );
+    return (rows.first['first_watched_at'] as num?)?.toInt();
+  }
+
+  Future<void> addMovieWatchEvent({
+    required int mediaId,
+    int? watchedAtMillis,
+  }) async {
+    final db = await database;
+    final now = watchedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    await db.insert('movie_watch_events', <String, Object?>{
+      'media_id': mediaId,
+      'watched_at': now,
+      'created_at': now,
+    });
+  }
+
+  Future<void> clearMovieWatchEvents(int mediaId) async {
+    final db = await database;
+    await db.delete(
+      'movie_watch_events',
+      where: 'media_id = ?',
+      whereArgs: <Object>[mediaId],
+    );
+  }
+
+  Future<int> countMovieWatchEvents(int mediaId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM movie_watch_events WHERE media_id = ?',
+      <Object>[mediaId],
+    );
+    return (rows.first['c'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int?> firstMovieWatchAt(int mediaId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT MIN(watched_at) AS first_watched_at FROM movie_watch_events WHERE media_id = ?',
+      <Object>[mediaId],
+    );
+    return (rows.first['first_watched_at'] as num?)?.toInt();
+  }
+
+  Future<Map<String, Object?>?> _episodeProgressRow(
+    DatabaseExecutor executor, {
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    final rows = await executor.query(
+      'episode_progress',
+      columns: <String>['is_watched', 'updated_at'],
+      where: 'media_id = ? AND season_number = ? AND episode_number = ?',
+      whereArgs: <Object>[mediaId, seasonNumber, episodeNumber],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
+
   Future<void> clearSessionData() async {
     final db = await database;
     await db.delete('watchlist');
     await db.delete('episode_progress');
+    await db.delete('episode_watch_events');
+    await db.delete('movie_watch_events');
     await db.delete('watchlist_tombstones');
     await db.delete('episode_progress_tombstones');
     await db.delete('sync_state');

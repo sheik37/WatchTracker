@@ -351,6 +351,54 @@ void main() {
     expect(find.text('Marquer comme vu'), findsNothing);
   });
 
+  testWidgets('sur épisode déjà vu, choisir Revoir garde la coche active', (
+    tester,
+  ) async {
+    bool? toggledValue;
+
+    await tester.pumpWidget(
+      buildPage(
+        watchedEpisodes: {'1_1'},
+        onToggleWatched: (_, value) async {
+          toggledValue = value;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Marquer non vu'));
+    await tester.pumpAndSettle();
+    expect(find.text('Épisode déjà vu'), findsOneWidget);
+
+    await tester.tap(find.text('Revoir (+1 vue)'));
+    await tester.pumpAndSettle();
+
+    expect(toggledValue, isTrue);
+  });
+
+  testWidgets('sur épisode déjà vu, choisir Marquer non vu décoche', (
+    tester,
+  ) async {
+    bool? toggledValue;
+
+    await tester.pumpWidget(
+      buildPage(
+        watchedEpisodes: {'1_1'},
+        onToggleWatched: (_, value) async {
+          toggledValue = value;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Marquer non vu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Marquer non vu').last);
+    await tester.pumpAndSettle();
+
+    expect(toggledValue, isFalse);
+  });
+
   testWidgets('le bouton appelle le callback au tap', (tester) async {
     Episode? toggledEpisode;
     bool? toggledValue;
@@ -462,6 +510,38 @@ void main() {
       expect(find.textContaining('10/06/2025'), findsOneWidget);
     },
   );
+
+  testWidgets('la revue conserve la date du premier visionnage', (
+    tester,
+  ) async {
+    final firstWatchMillis = DateTime(2024, 2, 10).millisecondsSinceEpoch;
+    var watched = <String>{'1_1'};
+    var watchedAt = <String, int>{'1_1': firstWatchMillis};
+
+    await tester.pumpWidget(
+      buildPage(
+        watchedEpisodes: watched,
+        episodeWatchedAt: watchedAt,
+        getProgress: () => (watched: watched, watchedAt: watchedAt),
+        onToggleWatched: (_, target) async {
+          if (target) {
+            watched = {'1_1'};
+            watchedAt = {'1_1': firstWatchMillis};
+          }
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('10/02/2024'), findsOneWidget);
+
+    await tester.tap(find.text('Marquer non vu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Revoir (+1 vue)'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('10/02/2024'), findsOneWidget);
+  });
 
   testWidgets('swipe horizontal change entre À propos et Épisodes', (
     tester,
@@ -635,6 +715,22 @@ void main() {
       find.byKey(const ValueKey('season-progress-1')),
     );
     expect(progress.backgroundColor, isNot(equals(Colors.white)));
+  });
+
+  testWidgets('sur saison déjà vue, le dialogue propose la revue de saison', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTitlePage(watchedEpisodes: {'1_1', '1_2'}));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('season-toggle-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saison déjà vue'), findsOneWidget);
+    expect(find.text('Revoir la saison (+1 vue)'), findsOneWidget);
   });
 }
 

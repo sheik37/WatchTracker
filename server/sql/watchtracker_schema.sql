@@ -112,6 +112,24 @@ CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
     PRIMARY KEY (user_id, media_id, season_number, episode_number)
 );
 
+CREATE TABLE IF NOT EXISTS episode_watch_events (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS movie_watch_events (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_id INTEGER NOT NULL,
+    watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_watchlist_category
     ON watchlist (user_id, content_category);
 
@@ -123,6 +141,12 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_tombstones_user_deleted
 
 CREATE INDEX IF NOT EXISTS idx_episode_progress_tombstones_user_deleted
     ON episode_progress_tombstones (user_id, deleted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_episode_watch_events_lookup
+    ON episode_watch_events (user_id, media_id, season_number, episode_number, watched_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_movie_watch_events_lookup
+    ON movie_watch_events (user_id, media_id, watched_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id
     ON auth_tokens (user_id);

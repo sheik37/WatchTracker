@@ -108,6 +108,100 @@ def test_watchlist_endpoints(monkeypatch):
     assert payload["episode_progress"][0]["media_id"] == 1
 
 
+def test_watchlist_movie_rewatch_endpoint(monkeypatch):
+    called = {}
+
+    def fake_rewatch(user_id, media_id, media_type, content_category):
+        called.update(
+            {
+                "user_id": user_id,
+                "media_id": media_id,
+                "media_type": media_type,
+                "content_category": content_category,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(app_module, "rewatch_movie", fake_rewatch)
+
+    response = client.post("/watchlist/42/movie/films/rewatch")
+    assert response.status_code == 204
+    assert called == {
+        "user_id": 1,
+        "media_id": 42,
+        "media_type": "movie",
+        "content_category": "films",
+    }
+
+
+def test_watchlist_movie_rewatch_rejects_non_movie():
+    response = client.post("/watchlist/42/tv/series/rewatch")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Rewatch endpoint is only available for movies"
+
+
+def test_episode_rewatch_endpoint(monkeypatch):
+    called = {}
+
+    def fake_rewatch_episode(user_id, media_id, season_number, episode_number):
+        called.update(
+            {
+                "user_id": user_id,
+                "media_id": media_id,
+                "season_number": season_number,
+                "episode_number": episode_number,
+            }
+        )
+
+    monkeypatch.setattr(app_module, "rewatch_episode_progress", fake_rewatch_episode)
+    response = client.post("/episode-progress/50/2/7/rewatch")
+
+    assert response.status_code == 204
+    assert called == {
+        "user_id": 1,
+        "media_id": 50,
+        "season_number": 2,
+        "episode_number": 7,
+    }
+
+
+def test_episode_rewatch_season_endpoint(monkeypatch):
+    called = {}
+
+    def fake_rewatch_season(user_id, media_id, season_number, episode_numbers):
+        called.update(
+            {
+                "user_id": user_id,
+                "media_id": media_id,
+                "season_number": season_number,
+                "episode_numbers": episode_numbers,
+            }
+        )
+
+    monkeypatch.setattr(app_module, "rewatch_episode_season", fake_rewatch_season)
+    response = client.post(
+        "/episode-progress/50/rewatch-season",
+        json={"season_number": 2, "episode_numbers": [1, 2, 3]},
+    )
+
+    assert response.status_code == 204
+    assert called == {
+        "user_id": 1,
+        "media_id": 50,
+        "season_number": 2,
+        "episode_numbers": [1, 2, 3],
+    }
+
+
+def test_episode_rewatch_season_endpoint_validates_episode_numbers():
+    response = client.post(
+        "/episode-progress/50/rewatch-season",
+        json={"season_number": 2, "episode_numbers": [1, 0, 3]},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid episode number"
+
+
 def test_auth_login(monkeypatch):
     monkeypatch.setattr(
         app_module,
