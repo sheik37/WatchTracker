@@ -147,6 +147,7 @@ void main() {
   Widget buildTitlePage({
     Set<String> watchedEpisodes = const {'1_1'},
     List<Episode>? seasonEpisodes,
+    Map<String, int> episodeViewCounts = const {},
   }) {
     return MaterialApp(
       home: DetailsScreen(
@@ -165,6 +166,7 @@ void main() {
                 ),
               )
               .toList(),
+          episodeViewCounts: episodeViewCounts,
           seasonEpisodes: {1: seasonEpisodes ?? titleSeasonEpisodes},
         ),
         media: titleMedia,
@@ -702,6 +704,43 @@ void main() {
     expect(find.byIcon(Icons.check_rounded), findsWidgets);
   });
 
+  testWidgets('le toggle épisode affiche xN quand il y a des revues', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTitlePage(
+        watchedEpisodes: const {'1_1'},
+        episodeViewCounts: const {'1_1': 3},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saison 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('x3'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsNothing);
+  });
+
+  testWidgets('le toggle saison affiche xN quand toute la saison est revue', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTitlePage(
+        watchedEpisodes: const {'1_1', '1_2'},
+        episodeViewCounts: const {'1_1': 2, '1_2': 4},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('x2'), findsOneWidget);
+  });
+
   testWidgets('la barre de progression de saison utilise une piste teintée', (
     tester,
   ) async {
@@ -740,6 +779,7 @@ class _FakeMediaRepository extends MediaRepository {
     required this.tracked,
     required this.status,
     required this.progress,
+    required this.episodeViewCounts,
     required this.seasonEpisodes,
   }) : super(
          TmdbApiClient(apiKey: ''),
@@ -751,6 +791,7 @@ class _FakeMediaRepository extends MediaRepository {
   final bool tracked;
   final WatchStatus? status;
   final List<RemoteEpisodeProgress> progress;
+  final Map<String, int> episodeViewCounts;
   final Map<int, List<Episode>> seasonEpisodes;
 
   @override
@@ -776,6 +817,10 @@ class _FakeMediaRepository extends MediaRepository {
   @override
   Future<List<RemoteEpisodeProgress>> getEpisodeProgress(int mediaId) async =>
       progress;
+
+  @override
+  Future<Map<String, int>> getEpisodeViewCounts(int mediaId) async =>
+      episodeViewCounts;
 
   @override
   Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async =>

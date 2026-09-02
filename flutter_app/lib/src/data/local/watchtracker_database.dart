@@ -634,6 +634,21 @@ class WatchTrackerDatabase {
     return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
+  Future<List<Map<String, Object?>>> episodeWatchEventCounts(
+    int mediaId,
+  ) async {
+    final db = await database;
+    return db.rawQuery(
+      '''
+      SELECT season_number, episode_number, COUNT(*) AS view_count
+      FROM episode_watch_events
+      WHERE media_id = ?
+      GROUP BY season_number, episode_number
+      ''',
+      <Object>[mediaId],
+    );
+  }
+
   Future<int?> firstEpisodeWatchAt({
     required int mediaId,
     required int seasonNumber,

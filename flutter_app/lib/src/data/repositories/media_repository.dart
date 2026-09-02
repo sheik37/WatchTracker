@@ -553,6 +553,19 @@ class MediaRepository {
     );
   }
 
+  Future<Map<String, int>> getEpisodeViewCounts(int mediaId) async {
+    final rows = await _database.episodeWatchEventCounts(mediaId);
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final season = (row['season_number'] as num?)?.toInt();
+      final episode = (row['episode_number'] as num?)?.toInt();
+      final count = (row['view_count'] as num?)?.toInt() ?? 0;
+      if (season == null || episode == null || count <= 0) continue;
+      counts['${season}_$episode'] = count;
+    }
+    return counts;
+  }
+
   Future<void> updateEpisodeProgressBatch({
     required int mediaId,
     required List<RemoteEpisodeProgress> updates,

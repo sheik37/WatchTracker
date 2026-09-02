@@ -33,6 +33,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   String? _error;
   Set<String> _watchedEpisodes = {};
   Map<String, int> _episodeWatchedAt = {};
+  Map<String, int> _episodeViewCounts = {};
   int? _movieWatchedAtMillis;
   bool _showEpisodes = false;
   int _tvTabDirection = 1;
@@ -96,6 +97,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
       final progressList = await widget.repository.getEpisodeProgress(
         widget.media.id,
       );
+      final viewCounts = Map<String, int>.from(
+        await widget.repository.getEpisodeViewCounts(widget.media.id),
+      );
       final watchedSet = progressList
           .where((p) => p.isWatched)
           .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
@@ -104,11 +108,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
         for (final p in progressList.where((p) => p.isWatched))
           '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
       };
+      for (final key in watchedSet) {
+        viewCounts.putIfAbsent(key, () => 1);
+      }
       _details = details;
       _tracked = tracked;
       _status = status;
       _watchedEpisodes = watchedSet;
       _episodeWatchedAt = watchedAtMap;
+      _episodeViewCounts = viewCounts;
       _movieWatchedAtMillis =
           details.mediaType == MediaType.movie && status == WatchStatus.watched
           ? await widget.repository.getMovieFirstWatchedAt(details.id)
@@ -280,19 +288,28 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final wasWatched = _watchedEpisodes.contains(key);
     final previous = <String>{..._watchedEpisodes};
     final previousAt = Map<String, int>.from(_episodeWatchedAt);
+    final previousCounts = Map<String, int>.from(_episodeViewCounts);
     final next = <String>{..._watchedEpisodes};
     final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final nextCounts = Map<String, int>.from(_episodeViewCounts);
     final ts = updatedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     if (watched) {
       next.add(key);
       nextAt[key] = previousAt[key] ?? ts;
+      if (wasWatched || rewatch) {
+        nextCounts[key] = (previousCounts[key] ?? 1) + 1;
+      } else {
+        nextCounts[key] = 1;
+      }
     } else {
       next.remove(key);
       nextAt.remove(key);
+      nextCounts.remove(key);
     }
     setState(() {
       _watchedEpisodes = next;
       _episodeWatchedAt = nextAt;
+      _episodeViewCounts = nextCounts;
     });
     _updateTvStatus(details);
     if (watched) {
@@ -319,6 +336,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       setState(() {
         _watchedEpisodes = previous;
         _episodeWatchedAt = previousAt;
+        _episodeViewCounts = previousCounts;
       });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -489,8 +507,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
     if (updates.isEmpty) return;
     final previous = <String>{..._watchedEpisodes};
     final previousAt = Map<String, int>.from(_episodeWatchedAt);
+    final previousCounts = Map<String, int>.from(_episodeViewCounts);
     final next = <String>{..._watchedEpisodes};
     final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final nextCounts = Map<String, int>.from(_episodeViewCounts);
     final nowFallback =
         sharedTimestamp ?? DateTime.now().millisecondsSinceEpoch;
     for (final update in updates) {
@@ -498,14 +518,24 @@ class _DetailsScreenState extends State<DetailsScreen> {
       if (update.isWatched) {
         next.add(key);
         nextAt[key] = previousAt[key] ?? update.updatedAtMillis ?? nowFallback;
+        final alreadyWatched = previous.contains(key);
+        if (alreadyWatched) {
+          nextCounts[key] = includeAlreadyWatchedForMarked
+              ? (previousCounts[key] ?? 1) + 1
+              : (previousCounts[key] ?? 1);
+        } else {
+          nextCounts[key] = 1;
+        }
       } else {
         next.remove(key);
         nextAt.remove(key);
+        nextCounts.remove(key);
       }
     }
     setState(() {
       _watchedEpisodes = next;
       _episodeWatchedAt = nextAt;
+      _episodeViewCounts = nextCounts;
     });
     _updateTvStatus(details);
     try {
@@ -519,6 +549,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       setState(() {
         _watchedEpisodes = previous;
         _episodeWatchedAt = previousAt;
+        _episodeViewCounts = previousCounts;
       });
       _updateTvStatus(details);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1039,6 +1070,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       season: season,
                       seasonOffset: seasonOffsets[season.seasonNumber] ?? 0,
                       watchedEpisodes: _watchedEpisodes,
+                      episodeViewCounts: _episodeViewCounts,
                       onToggleEpisode: (episode, watched, updatedAtMillis) =>
                           _setEpisodeWatched(
                             episode,
@@ -1669,12 +1701,14 @@ class _WatchedToggleButton extends StatelessWidget {
     required this.checked,
     required this.onTap,
     required this.tooltip,
+    this.reviewCount,
     this.size = 34,
   });
 
   final bool checked;
   final VoidCallback? onTap;
   final String tooltip;
+  final int? reviewCount;
   final double size;
 
   @override
@@ -1716,14 +1750,8 @@ class _WatchedToggleButton extends StatelessWidget {
               child: Center(
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 160),
-                  child: checked
-                      ? Icon(
-                          Icons.check_rounded,
-                          key: const ValueKey('checked'),
-                          color: colorScheme.onPrimary,
-                          size: size * 0.56,
-                        )
-                      : Container(
+                  child: !checked
+                      ? Container(
                           key: const ValueKey('unchecked'),
                           width: size * 0.18,
                           height: size * 0.18,
@@ -1731,6 +1759,22 @@ class _WatchedToggleButton extends StatelessWidget {
                             shape: BoxShape.circle,
                             color: colorScheme.outlineVariant,
                           ),
+                        )
+                      : (reviewCount ?? 0) > 1
+                      ? Text(
+                          'x${reviewCount!}',
+                          key: ValueKey('review-count-${reviewCount!}'),
+                          style: TextStyle(
+                            color: colorScheme.onPrimary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: size * 0.32,
+                          ),
+                        )
+                      : Icon(
+                          Icons.check_rounded,
+                          key: const ValueKey('checked'),
+                          color: colorScheme.onPrimary,
+                          size: size * 0.56,
                         ),
                 ),
               ),
@@ -1751,6 +1795,7 @@ class _SeasonSection extends StatefulWidget {
     required this.season,
     required this.seasonOffset,
     required this.watchedEpisodes,
+    required this.episodeViewCounts,
     required this.onToggleEpisode,
     required this.onMarkSeasonWatched,
     required this.onRewatchSeason,
@@ -1768,6 +1813,7 @@ class _SeasonSection extends StatefulWidget {
   final Season season;
   final int seasonOffset;
   final Set<String> watchedEpisodes;
+  final Map<String, int> episodeViewCounts;
   final Future<void> Function(Episode, bool, int?) onToggleEpisode;
   final Future<void> Function(Season, bool) onMarkSeasonWatched;
   final Future<void> Function(Season) onRewatchSeason;
@@ -1913,6 +1959,15 @@ class _SeasonSectionState extends State<_SeasonSection> {
 
   bool _isWatched(Episode ep) =>
       widget.watchedEpisodes.contains(_episodeWatchKey(ep));
+
+  int _episodeViewCount(Episode ep) =>
+      widget.episodeViewCounts[_episodeWatchKey(ep)] ??
+      (_isWatched(ep) ? 1 : 0);
+
+  int? _episodeReviewCount(Episode ep) {
+    final count = _episodeViewCount(ep);
+    return count > 1 ? count : null;
+  }
 
   bool get _isSpecialSeason => widget.season.seasonNumber == 0;
 
@@ -2126,6 +2181,29 @@ class _SeasonSectionState extends State<_SeasonSection> {
     return watched >= widget.season.episodeCount;
   }
 
+  int? _seasonReviewCount(int totalCount) {
+    if (!_isSeasonFullyWatched() || totalCount <= 0) return null;
+    int? minCount;
+    if (_episodes.isNotEmpty) {
+      for (final episode in _episodes) {
+        final episodeCount = _episodeViewCount(episode);
+        if (minCount == null || episodeCount < minCount) {
+          minCount = episodeCount;
+        }
+      }
+    } else {
+      for (var i = 1; i <= totalCount; i++) {
+        final key = '${widget.season.seasonNumber}_$i';
+        final episodeCount = widget.episodeViewCounts[key] ?? 1;
+        if (minCount == null || episodeCount < minCount) {
+          minCount = episodeCount;
+        }
+      }
+    }
+    if (minCount == null || minCount <= 1) return null;
+    return minCount;
+  }
+
   Future<_RewatchChoice?> _showRewatchEpisodeDialog() {
     return showDialog<_RewatchChoice>(
       context: context,
@@ -2242,6 +2320,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
         .length;
     final totalCount = widget.season.episodeCount;
     final allWatched = totalCount > 0 && watchedCount >= totalCount;
+    final seasonReviewCount = _seasonReviewCount(totalCount);
     final showProgress = watchedCount > 0 && totalCount > 0;
     final progress = totalCount > 0 ? watchedCount / totalCount : 0.0;
     final progressColor = allWatched
@@ -2309,6 +2388,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                           'season-toggle-${widget.season.seasonNumber}',
                         ),
                         checked: allWatched,
+                        reviewCount: seasonReviewCount,
                         size: 36,
                         tooltip: allWatched
                             ? 'Marquer la saison non vue'
@@ -2432,6 +2512,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                         'episode-toggle-${ep.seasonNumber}_${ep.episodeNumber}',
                                       ),
                                       checked: watched,
+                                      reviewCount: _episodeReviewCount(ep),
                                       size: 32,
                                       tooltip: watched
                                           ? 'Marquer l\'épisode non vu'
