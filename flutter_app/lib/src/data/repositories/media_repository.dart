@@ -280,6 +280,22 @@ class MediaRepository {
     return _database.countMovieWatchEvents(mediaId);
   }
 
+  Future<List<int>> getEpisodeWatchDates({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) {
+    return _database.getEpisodeWatchDates(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+  }
+
+  Future<List<int>> getMovieWatchDates(int mediaId) {
+    return _database.getMovieWatchDates(mediaId);
+  }
+
   Future<void> markMovieWatched(
     Media media,
     WatchCategory category, {

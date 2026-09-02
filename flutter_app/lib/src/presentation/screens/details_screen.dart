@@ -34,7 +34,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Set<String> _watchedEpisodes = {};
   Map<String, int> _episodeWatchedAt = {};
   Map<String, int> _episodeViewCounts = {};
+  Map<String, List<int>> _episodeWatchDates = {};
   int? _movieWatchedAtMillis;
+  int _movieViewCount = 0;
+  List<int> _movieWatchDates = [];
   bool _showEpisodes = false;
   int _tvTabDirection = 1;
   final ScrollController _scrollCtrl = ScrollController();
@@ -121,6 +124,17 @@ class _DetailsScreenState extends State<DetailsScreen> {
           details.mediaType == MediaType.movie && status == WatchStatus.watched
           ? await widget.repository.getMovieFirstWatchedAt(details.id)
           : null;
+      _movieViewCount = details.mediaType == MediaType.movie
+          ? await widget.repository.getMovieViewCount(details.id)
+          : 0;
+      if (details.mediaType == MediaType.movie && _movieViewCount > 0) {
+        _movieWatchDates = await widget.repository.getMovieWatchDates(
+          details.id,
+        );
+      }
+      if (details.mediaType == MediaType.tv) {
+        await _loadEpisodeWatchDates(details);
+      }
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -129,6 +143,31 @@ class _DetailsScreenState extends State<DetailsScreen> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadEpisodeWatchDates(MediaDetails details) async {
+    if (details.seasons.isEmpty) return;
+    final newDates = <String, List<int>>{};
+    for (final season in details.seasons) {
+      for (int ep = 1; ep <= season.episodeCount; ep++) {
+        try {
+          final dates = await widget.repository.getEpisodeWatchDates(
+            mediaId: details.id,
+            seasonNumber: season.seasonNumber,
+            episodeNumber: ep,
+          );
+          if (dates.isNotEmpty) {
+            final key = '${season.seasonNumber}_$ep';
+            newDates[key] = dates;
+          }
+        } catch (_) {}
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _episodeWatchDates = newDates;
+      });
     }
   }
 
@@ -220,6 +259,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final newStatus = watched ? WatchStatus.watched : WatchStatus.notWatched;
     final previousStatus = _status;
     final previousMillis = _movieWatchedAtMillis;
+    final previousViewCount = _movieViewCount;
     final previousTracked = _tracked;
     final nowMillis = DateTime.now().millisecondsSinceEpoch;
     final nextMovieWatchedAt =
@@ -228,11 +268,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
         : watched
         ? nowMillis
         : null;
+    final nextMovieViewCount = watched
+        ? (wasWatched || rewatch ? previousViewCount + 1 : 1)
+        : 0;
     // Optimistic update
     setState(() {
       if (!_tracked) _tracked = true;
       _status = newStatus;
       _movieWatchedAtMillis = nextMovieWatchedAt;
+      _movieViewCount = nextMovieViewCount;
     });
     try {
       if (!previousTracked) {
@@ -263,12 +307,21 @@ class _DetailsScreenState extends State<DetailsScreen> {
       } else {
         await widget.repository.markMovieUnwatched(details.toMedia(), category);
       }
+      final refreshedMovieViewCount = await widget.repository.getMovieViewCount(
+        details.id,
+      );
+      if (mounted) {
+        setState(() => _movieViewCount = refreshedMovieViewCount);
+      } else {
+        _movieViewCount = refreshedMovieViewCount;
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _tracked = previousTracked;
         _status = previousStatus;
         _movieWatchedAtMillis = previousMillis;
+        _movieViewCount = previousViewCount;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour le film: $e')),
@@ -783,6 +836,102 @@ class _DetailsScreenState extends State<DetailsScreen> {
     );
   }
 
+  void _showEpisodeWatchHistoryDialog(Episode episode) {
+    final key = '${episode.seasonNumber}_${episode.episodeNumber}';
+    final dates = _episodeWatchDates[key] ?? [];
+    if (dates.isEmpty) return;
+
+    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
+    final rewatches = dates.skip(1).toList();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Historique de visionnage'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
+              ),
+              if (rewatches.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Revues (${rewatches.length}):',
+                  style: Theme.of(ctx).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+                ...rewatches.map((ms) {
+                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+                  return Text(
+                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMovieWatchHistoryDialog() {
+    if (_movieWatchDates.isEmpty) return;
+
+    final firstDate = DateTime.fromMillisecondsSinceEpoch(
+      _movieWatchDates.first,
+    );
+    final rewatches = _movieWatchDates.skip(1).toList();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Historique de visionnage'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
+              ),
+              if (rewatches.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Revues (${rewatches.length}):',
+                  style: Theme.of(ctx).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+                ...rewatches.map((ms) {
+                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+                  return Text(
+                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openEpisodeDetailPage(Episode episode) async {
     final details = _details;
     if (details == null) return;
@@ -823,14 +972,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
         builder: (ctx) => EpisodeDetailPage(
           episodes: allEpisodes,
           initialIndex: index,
+          mediaId: details.id,
+          repository: widget.repository,
           watchedEpisodes: _watchedEpisodes,
           episodeWatchedAt: _episodeWatchedAt,
+          episodeViewCounts: _episodeViewCounts,
           seasonOffsets: offsets,
           seriesTitle: details.title,
           isReleasedCheck: _isReleasedEpisode,
           onToggleWatched: _toggleEpisodeWithCheck,
-          getProgress: () =>
-              (watched: _watchedEpisodes, watchedAt: _episodeWatchedAt),
+          getProgress: () => (
+            watched: _watchedEpisodes,
+            watchedAt: _episodeWatchedAt,
+            viewCounts: _episodeViewCounts,
+          ),
         ),
       ),
     );
@@ -1090,6 +1245,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       onEpisodesLoaded: _onSeasonEpisodesLoaded,
                       jumpRequestToken: _nextEpisodeJumpToken,
                       jumpTargetEpisode: _nextEpisodeTarget,
+                      onShowEpisodeHistory: _showEpisodeWatchHistoryDialog,
                     ),
                 ],
               ),
@@ -1182,7 +1338,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   releaseDate: details.releaseDate,
                   isWatched: _status == WatchStatus.watched,
                   watchedAtMillis: _movieWatchedAtMillis,
+                  movieViewCount: _movieViewCount,
                   onChanged: _setMovieWatched,
+                  onRewatchTap: _movieViewCount > 1
+                      ? _showMovieWatchHistoryDialog
+                      : null,
                 ),
               ),
               SliverToBoxAdapter(
@@ -1637,13 +1797,17 @@ class _MovieInfoStrip extends StatelessWidget {
     required this.releaseDate,
     required this.isWatched,
     required this.watchedAtMillis,
+    required this.movieViewCount,
     required this.onChanged,
+    this.onRewatchTap,
   });
 
   final String? releaseDate;
   final bool isWatched;
   final int? watchedAtMillis;
+  final int movieViewCount;
   final ValueChanged<bool> onChanged;
+  final VoidCallback? onRewatchTap;
 
   String _formatDate(String? raw) {
     if (raw == null || raw.isEmpty) return 'Date inconnue';
@@ -1688,7 +1852,19 @@ class _MovieInfoStrip extends StatelessWidget {
               ],
             ),
           ),
-          Checkbox(value: isWatched, onChanged: (v) => onChanged(v ?? false)),
+          _WatchedToggleButton(
+            key: const ValueKey('movie-watched-toggle'),
+            checked: isWatched,
+            reviewCount: isWatched && movieViewCount > 1
+                ? movieViewCount
+                : null,
+            onTap: () => onChanged(!isWatched),
+            onRewatchTap: onRewatchTap,
+            tooltip: isWatched
+                ? 'Marquer le film non vu'
+                : 'Marquer le film vu',
+            size: 36,
+          ),
         ],
       ),
     );
@@ -1702,6 +1878,7 @@ class _WatchedToggleButton extends StatelessWidget {
     required this.onTap,
     required this.tooltip,
     this.reviewCount,
+    this.onRewatchTap,
     this.size = 34,
   });
 
@@ -1709,6 +1886,7 @@ class _WatchedToggleButton extends StatelessWidget {
   final VoidCallback? onTap;
   final String tooltip;
   final int? reviewCount;
+  final VoidCallback? onRewatchTap;
   final double size;
 
   @override
@@ -1761,13 +1939,16 @@ class _WatchedToggleButton extends StatelessWidget {
                           ),
                         )
                       : (reviewCount ?? 0) > 1
-                      ? Text(
-                          'x${reviewCount!}',
-                          key: ValueKey('review-count-${reviewCount!}'),
-                          style: TextStyle(
-                            color: colorScheme.onPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: size * 0.32,
+                      ? GestureDetector(
+                          onTap: onRewatchTap,
+                          child: Text(
+                            'x${reviewCount!}',
+                            key: ValueKey('review-count-${reviewCount!}'),
+                            style: TextStyle(
+                              color: colorScheme.onPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: size * 0.32,
+                            ),
                           ),
                         )
                       : Icon(
@@ -1805,6 +1986,7 @@ class _SeasonSection extends StatefulWidget {
     required this.onEpisodesLoaded,
     required this.jumpRequestToken,
     required this.jumpTargetEpisode,
+    this.onShowEpisodeHistory,
   });
 
   final int mediaId;
@@ -1824,6 +2006,7 @@ class _SeasonSection extends StatefulWidget {
   onEpisodesLoaded;
   final int jumpRequestToken;
   final Episode? jumpTargetEpisode;
+  final Function(Episode)? onShowEpisodeHistory;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -2519,6 +2702,11 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                           : 'Marquer l\'épisode vu',
                                       onTap: () =>
                                           _onEpisodeCheckRequest(ep, !watched),
+                                      onRewatchTap:
+                                          _episodeReviewCount(ep) != null
+                                          ? () => widget.onShowEpisodeHistory
+                                                ?.call(ep)
+                                          : null,
                                     ),
                             ),
                           ),
@@ -2580,8 +2768,11 @@ class EpisodeDetailPage extends StatefulWidget {
     super.key,
     required this.episodes,
     required this.initialIndex,
+    required this.mediaId,
+    required this.repository,
     required this.watchedEpisodes,
     required this.episodeWatchedAt,
+    required this.episodeViewCounts,
     required this.seasonOffsets,
     required this.seriesTitle,
     required this.isReleasedCheck,
@@ -2591,15 +2782,23 @@ class EpisodeDetailPage extends StatefulWidget {
 
   final List<Episode> episodes;
   final int initialIndex;
+  final int mediaId;
+  final MediaRepository repository;
   final Set<String> watchedEpisodes;
   final Map<String, int> episodeWatchedAt;
+  final Map<String, int> episodeViewCounts;
   final Map<int, int> seasonOffsets;
   final String seriesTitle;
   final bool Function(Episode) isReleasedCheck;
   final Future<void> Function(Episode, bool) onToggleWatched;
 
-  /// Returns the current (watched, watchedAt) from the parent after a toggle.
-  final ({Set<String> watched, Map<String, int> watchedAt}) Function()
+  /// Returns the current progress from the parent after a toggle.
+  final ({
+    Set<String> watched,
+    Map<String, int> watchedAt,
+    Map<String, int> viewCounts,
+  })
+  Function()
   getProgress;
 
   @override
@@ -2611,6 +2810,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   late PageController _pageController;
   late Map<String, bool> _watchedLocal;
   late Map<String, int> _watchedAtLocal;
+  late Map<String, int> _viewCountsLocal;
+  late Map<String, List<int>> _episodeWatchDates;
 
   @override
   void initState() {
@@ -2623,6 +2824,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             .contains('${ep.seasonNumber}_${ep.episodeNumber}'),
     };
     _watchedAtLocal = Map<String, int>.from(widget.episodeWatchedAt);
+    _viewCountsLocal = Map<String, int>.from(widget.episodeViewCounts);
+    for (final entry in _watchedLocal.entries) {
+      if (entry.value) {
+        _viewCountsLocal.putIfAbsent(entry.key, () => 1);
+      }
+    }
+    _episodeWatchDates = {};
+    _loadWatchDates();
   }
 
   @override
@@ -2640,6 +2849,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     _watchedAtLocal
       ..clear()
       ..addAll(progress.watchedAt);
+    _viewCountsLocal
+      ..clear()
+      ..addAll(progress.viewCounts);
+    for (final entry in _watchedLocal.entries) {
+      if (entry.value) {
+        _viewCountsLocal.putIfAbsent(entry.key, () => 1);
+      }
+    }
   }
 
   void _goTo(int index) {
@@ -2673,6 +2890,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       } else if (target && isWatched) {
         _watchedAtLocal[k] = _watchedAtLocal[k] ?? nowMillis;
       }
+      if (target && isWatched) {
+        _viewCountsLocal[k] = (_viewCountsLocal[k] ?? 1) + 1;
+      } else if (target) {
+        _viewCountsLocal[k] = 1;
+      } else {
+        _viewCountsLocal.remove(k);
+      }
     });
     await widget.onToggleWatched(ep, target);
     if (mounted) setState(_syncFromProgress);
@@ -2696,6 +2920,72 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
             icon: const Icon(Icons.replay_rounded, size: 18),
             label: const Text('Revoir (+1 vue)'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadWatchDates() async {
+    for (final ep in widget.episodes) {
+      try {
+        final dates = await widget.repository.getEpisodeWatchDates(
+          mediaId: widget.mediaId,
+          seasonNumber: ep.seasonNumber,
+          episodeNumber: ep.episodeNumber,
+        );
+        final key = '${ep.seasonNumber}_${ep.episodeNumber}';
+        if (mounted) {
+          setState(() {
+            _episodeWatchDates[key] = dates;
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  void _showWatchHistoryDialog(Episode ep) {
+    final key = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final dates = _episodeWatchDates[key] ?? [];
+    if (dates.isEmpty) return;
+
+    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
+    final rewatches = dates.skip(1).toList();
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+        title: const Text('Historique de visionnage'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
+              ),
+              if (rewatches.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Revues (${rewatches.length}):',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+                ...rewatches.map((ms) {
+                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+                  return Text(
+                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fermer'),
           ),
         ],
       ),
@@ -2761,6 +3051,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final isWatched = _watchedLocal[k] ?? false;
     final isReleased = widget.isReleasedCheck(ep);
     final watchedLabel = isWatched ? _watchedDateLabel(k) : null;
+    final viewCount = _viewCountsLocal[k] ?? (isWatched ? 1 : 0);
+    final rewatchCount = viewCount > 1 ? viewCount : null;
     final runtimeLabel = ep.runtime != null ? '${ep.runtime} min' : 'Inconnue';
     final airDateLabel = ep.airDate?.isNotEmpty == true
         ? ep.airDate!
@@ -2804,6 +3096,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 Chip(
                   avatar: const Icon(Icons.check_circle, size: 16),
                   label: Text(watchedLabel ?? 'Vu'),
+                ),
+              if (rewatchCount != null)
+                ActionChip(
+                  avatar: const Icon(Icons.replay_rounded, size: 16),
+                  label: Text('x$rewatchCount vues'),
+                  onPressed: () => _showWatchHistoryDialog(ep),
                 ),
             ],
           ),

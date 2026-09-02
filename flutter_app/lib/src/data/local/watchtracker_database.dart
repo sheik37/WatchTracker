@@ -666,6 +666,27 @@ class WatchTrackerDatabase {
     return (rows.first['first_watched_at'] as num?)?.toInt();
   }
 
+  Future<List<int>> getEpisodeWatchDates({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT watched_at
+      FROM episode_watch_events
+      WHERE media_id = ? AND season_number = ? AND episode_number = ?
+      ORDER BY watched_at ASC
+      ''',
+      <Object>[mediaId, seasonNumber, episodeNumber],
+    );
+    return rows
+        .map((row) => (row['watched_at'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+  }
+
   Future<void> addMovieWatchEvent({
     required int mediaId,
     int? watchedAtMillis,
@@ -704,6 +725,23 @@ class WatchTrackerDatabase {
       <Object>[mediaId],
     );
     return (rows.first['first_watched_at'] as num?)?.toInt();
+  }
+
+  Future<List<int>> getMovieWatchDates(int mediaId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT watched_at
+      FROM movie_watch_events
+      WHERE media_id = ?
+      ORDER BY watched_at ASC
+      ''',
+      <Object>[mediaId],
+    );
+    return rows
+        .map((row) => (row['watched_at'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
   }
 
   Future<Map<String, Object?>?> _episodeProgressRow(

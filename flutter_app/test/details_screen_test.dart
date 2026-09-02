@@ -115,31 +115,78 @@ void main() {
       runtime: 43,
     ),
   ];
+  const movieMedia = Media(
+    id: 301,
+    title: 'Film test',
+    posterPath: null,
+    backdropPath: null,
+    overview: 'Résumé film test',
+    releaseDate: '2024-02-01',
+    voteAverage: 7.5,
+    mediaType: MediaType.movie,
+  );
+  const movieDetails = MediaDetails(
+    id: 301,
+    title: 'Film test',
+    overview: 'Résumé film test',
+    posterPath: null,
+    backdropPath: null,
+    releaseDate: '2024-02-01',
+    voteAverage: 7.5,
+    mediaType: MediaType.movie,
+    seasons: [],
+  );
 
   Widget buildPage({
+    int mediaId = 100,
+    MediaRepository? repository,
     int initialIndex = 0,
     Set<String> watchedEpisodes = const {},
     Map<String, int> episodeWatchedAt = emptyWatchedAt,
+    Map<String, int> episodeViewCounts = const {},
     bool Function(Episode)? isReleasedCheck,
     Future<void> Function(Episode, bool)? onToggleWatched,
     List<Episode>? episodeList,
     Map<int, int>? seasonOffsets,
     String? seriesTitle,
-    ({Set<String> watched, Map<String, int> watchedAt}) Function()? getProgress,
+    ({
+      Set<String> watched,
+      Map<String, int> watchedAt,
+      Map<String, int> viewCounts,
+    })
+    Function()?
+    getProgress,
   }) {
+    final repo =
+        repository ??
+        _FakeMediaRepository(
+          details: titleDetails,
+          tracked: true,
+          status: WatchStatus.watched,
+          progress: const [],
+          episodeViewCounts: episodeViewCounts,
+          seasonEpisodes: {},
+        );
     return MaterialApp(
       home: EpisodeDetailPage(
         episodes: episodeList ?? episodes,
         initialIndex: initialIndex,
+        mediaId: mediaId,
+        repository: repo,
         watchedEpisodes: watchedEpisodes,
         episodeWatchedAt: episodeWatchedAt,
+        episodeViewCounts: episodeViewCounts,
         seasonOffsets: seasonOffsets ?? defaultOffsets,
         seriesTitle: seriesTitle ?? defaultSeriesTitle,
         isReleasedCheck: isReleasedCheck ?? (ep) => ep.airDate != '2099-01-01',
         onToggleWatched: onToggleWatched ?? (_, _) async {},
         getProgress:
             getProgress ??
-            () => (watched: watchedEpisodes, watchedAt: episodeWatchedAt),
+            () => (
+              watched: watchedEpisodes,
+              watchedAt: episodeWatchedAt,
+              viewCounts: episodeViewCounts,
+            ),
       ),
     );
   }
@@ -170,6 +217,28 @@ void main() {
           seasonEpisodes: {1: seasonEpisodes ?? titleSeasonEpisodes},
         ),
         media: titleMedia,
+      ),
+    );
+  }
+
+  Widget buildMovieTitlePage({
+    WatchStatus status = WatchStatus.notWatched,
+    int movieViewCount = 0,
+    int? firstWatchedAtMillis,
+  }) {
+    return MaterialApp(
+      home: DetailsScreen(
+        repository: _FakeMediaRepository(
+          details: movieDetails,
+          tracked: true,
+          status: status,
+          progress: const [],
+          episodeViewCounts: const {},
+          seasonEpisodes: const {},
+          movieViewCount: movieViewCount,
+          movieFirstWatchedAt: firstWatchedAtMillis,
+        ),
+        media: movieMedia,
       ),
     );
   }
@@ -433,6 +502,14 @@ void main() {
   });
 
   testWidgets('supports back navigation', (tester) async {
+    final fakeRepo = _FakeMediaRepository(
+      details: titleDetails,
+      tracked: true,
+      status: WatchStatus.watched,
+      progress: const [],
+      episodeViewCounts: const {},
+      seasonEpisodes: {},
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -443,13 +520,20 @@ void main() {
                   builder: (_) => EpisodeDetailPage(
                     episodes: episodes,
                     initialIndex: 0,
+                    mediaId: 100,
+                    repository: fakeRepo,
                     watchedEpisodes: const {},
                     episodeWatchedAt: const {},
+                    episodeViewCounts: const {},
                     seasonOffsets: defaultOffsets,
                     seriesTitle: defaultSeriesTitle,
                     isReleasedCheck: (_) => true,
                     onToggleWatched: (_, _) async {},
-                    getProgress: () => (watched: const {}, watchedAt: const {}),
+                    getProgress: () => (
+                      watched: const {},
+                      watchedAt: const {},
+                      viewCounts: const {},
+                    ),
                   ),
                 ),
               ),
@@ -476,17 +560,21 @@ void main() {
       // Mutable state simulating the parent
       var watched = <String>{};
       var watchedAt = <String, int>{};
+      var viewCounts = <String, int>{};
 
       await tester.pumpWidget(
         buildPage(
           initialIndex: 1,
           watchedEpisodes: watched,
           episodeWatchedAt: watchedAt,
-          getProgress: () => (watched: watched, watchedAt: watchedAt),
+          episodeViewCounts: viewCounts,
+          getProgress: () =>
+              (watched: watched, watchedAt: watchedAt, viewCounts: viewCounts),
           onToggleWatched: (ep, target) async {
             // Simulate parent marking ep2 AND ep1 (batch)
             watched = {'1_1', '1_2'};
             watchedAt = {'1_1': millis, '1_2': millis};
+            viewCounts = {'1_1': 1, '1_2': 1};
           },
         ),
       );
@@ -519,16 +607,20 @@ void main() {
     final firstWatchMillis = DateTime(2024, 2, 10).millisecondsSinceEpoch;
     var watched = <String>{'1_1'};
     var watchedAt = <String, int>{'1_1': firstWatchMillis};
+    var viewCounts = <String, int>{'1_1': 1};
 
     await tester.pumpWidget(
       buildPage(
         watchedEpisodes: watched,
         episodeWatchedAt: watchedAt,
-        getProgress: () => (watched: watched, watchedAt: watchedAt),
+        episodeViewCounts: viewCounts,
+        getProgress: () =>
+            (watched: watched, watchedAt: watchedAt, viewCounts: viewCounts),
         onToggleWatched: (_, target) async {
           if (target) {
             watched = {'1_1'};
             watchedAt = {'1_1': firstWatchMillis};
+            viewCounts = {'1_1': 2};
           }
         },
       ),
@@ -543,6 +635,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('10/02/2024'), findsOneWidget);
+  });
+
+  testWidgets(
+    'affiche une étiquette xN vues sur la page épisode pour une revue',
+    (tester) async {
+      await tester.pumpWidget(
+        buildPage(
+          watchedEpisodes: const {'1_1'},
+          episodeViewCounts: const {'1_1': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('x3 vues'), findsOneWidget);
+    },
+  );
+
+  testWidgets('n’affiche pas l’étiquette xN vues pour un premier visionnage', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPage(
+        watchedEpisodes: const {'1_1'},
+        episodeViewCounts: const {'1_1': 1},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('vues'), findsNothing);
   });
 
   testWidgets('swipe horizontal change entre À propos et Épisodes', (
@@ -741,6 +862,59 @@ void main() {
     expect(find.text('x2'), findsOneWidget);
   });
 
+  testWidgets('sur film la case utilise le même toggle rond que les séries', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildMovieTitlePage(
+        status: WatchStatus.watched,
+        movieViewCount: 1,
+        firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('movie-watched-toggle')), findsOneWidget);
+    expect(find.byType(Checkbox), findsNothing);
+  });
+
+  testWidgets('sur film le toggle affiche xN quand il y a des revues', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildMovieTitlePage(
+        status: WatchStatus.watched,
+        movieViewCount: 3,
+        firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('x3'), findsOneWidget);
+  });
+
+  testWidgets('sur film revoir (+1 vue) garde le statut vu et incrémente xN', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildMovieTitlePage(
+        status: WatchStatus.watched,
+        movieViewCount: 1,
+        firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('movie-watched-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.text('Déjà vu'), findsOneWidget);
+
+    await tester.tap(find.text('Revoir (+1 vue)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('x2'), findsOneWidget);
+  });
+
   testWidgets('la barre de progression de saison utilise une piste teintée', (
     tester,
   ) async {
@@ -781,11 +955,15 @@ class _FakeMediaRepository extends MediaRepository {
     required this.progress,
     required this.episodeViewCounts,
     required this.seasonEpisodes,
+    this.movieViewCount = 0,
+    this.movieFirstWatchedAt,
   }) : super(
          TmdbApiClient(apiKey: ''),
          TvdbApiClient(apiKey: ''),
          WatchTrackerDatabase(),
-       );
+       ) {
+    _movieViewCount = movieViewCount;
+  }
 
   final MediaDetails details;
   final bool tracked;
@@ -793,6 +971,12 @@ class _FakeMediaRepository extends MediaRepository {
   final List<RemoteEpisodeProgress> progress;
   final Map<String, int> episodeViewCounts;
   final Map<int, List<Episode>> seasonEpisodes;
+  final int movieViewCount;
+  final int? movieFirstWatchedAt;
+  late int _movieViewCount;
+
+  @override
+  Future<MediaDetails> getMovieDetails(int id) async => details;
 
   @override
   Future<MediaDetails> getTvDetails(int id) async => details;
@@ -821,6 +1005,52 @@ class _FakeMediaRepository extends MediaRepository {
   @override
   Future<Map<String, int>> getEpisodeViewCounts(int mediaId) async =>
       episodeViewCounts;
+
+  @override
+  Future<int?> getMovieFirstWatchedAt(int mediaId) async => movieFirstWatchedAt;
+
+  @override
+  Future<int> getMovieViewCount(int mediaId) async => _movieViewCount;
+
+  @override
+  Future<List<int>> getEpisodeWatchDates({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async => const [];
+
+  @override
+  Future<List<int>> getMovieWatchDates(int mediaId) async => const [];
+
+  @override
+  Future<void> markMovieWatched(
+    Media media,
+    WatchCategory category, {
+    bool rewatch = false,
+    int? watchedAtMillis,
+  }) async {
+    _movieViewCount = (_movieViewCount <= 0) ? 1 : _movieViewCount + 1;
+  }
+
+  @override
+  Future<void> markMovieUnwatched(Media media, WatchCategory category) async {
+    _movieViewCount = 0;
+  }
+
+  @override
+  Future<void> addToWatchlist(
+    Media media,
+    WatchCategory category,
+    WatchStatus status,
+    int totalEpisodes,
+  ) async {}
+
+  @override
+  Future<void> updateWatchStatus(
+    Media media,
+    WatchCategory category,
+    WatchStatus status,
+  ) async {}
 
   @override
   Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async =>
