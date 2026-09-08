@@ -296,6 +296,48 @@ class MediaRepository {
     return _database.getMovieWatchDates(mediaId);
   }
 
+  Future<void> deleteMovieWatchEvent(
+    Media media,
+    WatchCategory category, {
+    required int watchedAtMillis,
+  }) async {
+    await _database.deleteMovieWatchEvent(
+      mediaId: media.id,
+      watchedAtMillis: watchedAtMillis,
+    );
+    final remaining = await getMovieViewCount(media.id);
+    if (remaining == 0) {
+      await updateWatchStatus(media, category, WatchStatus.notWatched);
+      return;
+    }
+    final firstWatchedAt = await getMovieFirstWatchedAt(media.id);
+    if (firstWatchedAt != null) {
+      await updateWatchStatus(media, category, WatchStatus.watched);
+    }
+  }
+
+  Future<void> deleteEpisodeWatchEvent({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    required int watchedAtMillis,
+  }) async {
+    await _database.deleteEpisodeWatchEvent(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      watchedAtMillis: watchedAtMillis,
+    );
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
   Future<void> markMovieWatched(
     Media media,
     WatchCategory category, {
@@ -427,6 +469,7 @@ class MediaRepository {
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
             updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
+            syncUpdatedAtMillis: (row['sync_updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
@@ -547,6 +590,40 @@ class MediaRepository {
         episodes: unwatchedUpdates,
       );
     }
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<List<int>> getEpisodeNumbersWithRewatches({
+    required int mediaId,
+    required int seasonNumber,
+  }) {
+    return _database.episodeNumbersWithRewatches(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+    );
+  }
+
+  Future<void> deleteLatestSeasonRewatchEvents({
+    required int mediaId,
+    required int seasonNumber,
+  }) async {
+    final episodeNumbers = await _database.episodeNumbersWithRewatches(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+    );
+    if (episodeNumbers.isEmpty) return;
+    await _database.deleteLatestEpisodeRewatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumbers: episodeNumbers,
+    );
     final backend = _backendApi;
     if (backend != null) {
       await backend.replaceEpisodeProgress(
@@ -744,6 +821,7 @@ class MediaRepository {
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
             updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
+            syncUpdatedAtMillis: (row['sync_updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
@@ -770,8 +848,10 @@ class MediaRepository {
       final local = localProgressByKey[key];
       final remote = remoteProgressByKey[key];
       final tombstone = episodeTombstones[key];
-      final localUpdated = local?.updatedAtMillis ?? 0;
-      final remoteUpdated = remote?.updatedAtMillis ?? 0;
+      final localUpdated =
+          local?.syncUpdatedAtMillis ?? local?.updatedAtMillis ?? 0;
+      final remoteUpdated =
+          remote?.syncUpdatedAtMillis ?? remote?.updatedAtMillis ?? 0;
       final deletedByTombstone =
           tombstone != null &&
           tombstone.deletedAtMillis >= localUpdated &&
@@ -789,7 +869,8 @@ class MediaRepository {
         final shouldPushDelete =
             local != null &&
             (sinceMillis == null ||
-                (local.updatedAtMillis ?? 0) > sinceMillis) &&
+                ((local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0) >
+                    sinceMillis)) &&
             (tombstone.deletedAtMillis >= remoteUpdated);
         if (shouldPushDelete) {
           pushEpisodeDeletes.add(tombstone);
@@ -810,7 +891,9 @@ class MediaRepository {
 
       if (local != null) {
         final localWins = remote == null
-            ? sinceMillis == null || (local.updatedAtMillis ?? 0) > sinceMillis
+            ? sinceMillis == null ||
+                  ((local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0) >
+                      sinceMillis)
             : _preferLocalEpisode(local, remote);
         if (localWins) {
           pushProgress.add(local);
@@ -837,6 +920,7 @@ class MediaRepository {
                 'episode_number': u.episodeNumber,
                 'is_watched': u.isWatched ? 1 : 0,
                 'updated_at': u.updatedAtMillis,
+                'sync_updated_at': u.syncUpdatedAtMillis,
               },
             )
             .toList(),
@@ -935,8 +1019,10 @@ class MediaRepository {
     RemoteEpisodeProgress local,
     RemoteEpisodeProgress remote,
   ) {
-    final localUpdated = local.updatedAtMillis ?? 0;
-    final remoteUpdated = remote.updatedAtMillis ?? 0;
+    final localUpdated =
+        local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0;
+    final remoteUpdated =
+        remote.syncUpdatedAtMillis ?? remote.updatedAtMillis ?? 0;
     if (localUpdated != remoteUpdated) return localUpdated > remoteUpdated;
     return local.isWatched && !remote.isWatched;
   }

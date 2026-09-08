@@ -144,6 +144,7 @@ void main() {
     Set<String> watchedEpisodes = const {},
     Map<String, int> episodeWatchedAt = emptyWatchedAt,
     Map<String, int> episodeViewCounts = const {},
+    Map<String, List<int>> episodeWatchDates = const {},
     bool Function(Episode)? isReleasedCheck,
     Future<void> Function(Episode, bool)? onToggleWatched,
     List<Episode>? episodeList,
@@ -165,6 +166,7 @@ void main() {
           status: WatchStatus.watched,
           progress: const [],
           episodeViewCounts: episodeViewCounts,
+          episodeWatchDates: episodeWatchDates,
           seasonEpisodes: {},
         );
     return MaterialApp(
@@ -195,6 +197,7 @@ void main() {
     Set<String> watchedEpisodes = const {'1_1'},
     List<Episode>? seasonEpisodes,
     Map<String, int> episodeViewCounts = const {},
+    Map<String, List<int>> episodeWatchDates = const {},
   }) {
     return MaterialApp(
       home: DetailsScreen(
@@ -214,6 +217,7 @@ void main() {
               )
               .toList(),
           episodeViewCounts: episodeViewCounts,
+          episodeWatchDates: episodeWatchDates,
           seasonEpisodes: {1: seasonEpisodes ?? titleSeasonEpisodes},
         ),
         media: titleMedia,
@@ -225,6 +229,7 @@ void main() {
     WatchStatus status = WatchStatus.notWatched,
     int movieViewCount = 0,
     int? firstWatchedAtMillis,
+    List<int> movieWatchDates = const [],
   }) {
     return MaterialApp(
       home: DetailsScreen(
@@ -237,6 +242,7 @@ void main() {
           seasonEpisodes: const {},
           movieViewCount: movieViewCount,
           movieFirstWatchedAt: firstWatchedAtMillis,
+          movieWatchDates: movieWatchDates,
         ),
         media: movieMedia,
       ),
@@ -845,6 +851,36 @@ void main() {
     expect(find.byIcon(Icons.check_rounded), findsNothing);
   });
 
+  testWidgets(
+    'sur la page titre un épisode avec rewatch propose Supprimer un visionnage',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTitlePage(
+          watchedEpisodes: const {'1_1'},
+          episodeViewCounts: const {'1_1': 3},
+          episodeWatchDates: {
+            '1_1': [
+              DateTime(2024, 3, 10).millisecondsSinceEpoch,
+              DateTime(2024, 3, 11).millisecondsSinceEpoch,
+              DateTime(2024, 3, 12).millisecondsSinceEpoch,
+            ],
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Épisodes'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Saison 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('episode-toggle-1_1')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Supprimer un visionnage'), findsOneWidget);
+      expect(find.text('Marquer non vu'), findsNothing);
+    },
+  );
+
   testWidgets('le toggle saison affiche xN quand toute la saison est revue', (
     tester,
   ) async {
@@ -861,6 +897,27 @@ void main() {
 
     expect(find.text('x2'), findsOneWidget);
   });
+
+  testWidgets(
+    'sur saison vue avec rewatches, le dialogue propose la suppression groupée',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTitlePage(
+          watchedEpisodes: const {'1_1', '1_2'},
+          episodeViewCounts: const {'1_1': 2, '1_2': 2},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Épisodes'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('season-toggle-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Supprimer les derniers rewatches'), findsOneWidget);
+      expect(find.text('Revoir la saison (+1 vue)'), findsOneWidget);
+    },
+  );
 
   testWidgets('sur film la case utilise le même toggle rond que les séries', (
     tester,
@@ -886,11 +943,103 @@ void main() {
         status: WatchStatus.watched,
         movieViewCount: 3,
         firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+        movieWatchDates: [
+          DateTime(2024, 3, 10).millisecondsSinceEpoch,
+          DateTime(2024, 3, 11).millisecondsSinceEpoch,
+          DateTime(2024, 3, 12).millisecondsSinceEpoch,
+        ],
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.text('x3'), findsOneWidget);
+  });
+
+  testWidgets('sur film l’historique est sur une étiquette dédiée', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildMovieTitlePage(
+        status: WatchStatus.watched,
+        movieViewCount: 3,
+        firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+        movieWatchDates: [
+          DateTime(2024, 3, 10).millisecondsSinceEpoch,
+          DateTime(2024, 3, 11).millisecondsSinceEpoch,
+          DateTime(2024, 3, 12).millisecondsSinceEpoch,
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('movie-rewatch-history-chip')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('movie-rewatch-history-chip')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Historique de visionnage'), findsOneWidget);
+    expect(find.text('Premier visionnage : 10/03/2024'), findsOneWidget);
+    expect(find.text('Dernier visionnage : 12/03/2024'), findsOneWidget);
+    expect(find.text('Revues (2):'), findsOneWidget);
+    expect(find.text('• 12/03/2024'), findsOneWidget);
+  });
+
+  testWidgets(
+    'sur épisode l’historique affiche le dernier visionnage en premier',
+    (tester) async {
+      await tester.pumpWidget(
+        buildPage(
+          watchedEpisodes: const {'1_1'},
+          episodeWatchedAt: {
+            '1_1': DateTime(2024, 3, 10).millisecondsSinceEpoch,
+          },
+          episodeViewCounts: const {'1_1': 3},
+          episodeWatchDates: {
+            '1_1': [
+              DateTime(2024, 3, 10).millisecondsSinceEpoch,
+              DateTime(2024, 3, 11).millisecondsSinceEpoch,
+              DateTime(2024, 3, 12).millisecondsSinceEpoch,
+            ],
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('x3 vues'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Historique de visionnage'), findsOneWidget);
+      expect(find.text('Dernier visionnage : 12/03/2024'), findsOneWidget);
+      expect(find.text('• 12/03/2024'), findsOneWidget);
+      expect(find.text('• 11/03/2024'), findsOneWidget);
+    },
+  );
+
+  testWidgets('sur film le toggle n’ouvre que le dialogue déjà vu', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildMovieTitlePage(
+        status: WatchStatus.watched,
+        movieViewCount: 3,
+        firstWatchedAtMillis: DateTime(2024, 3, 10).millisecondsSinceEpoch,
+        movieWatchDates: [
+          DateTime(2024, 3, 10).millisecondsSinceEpoch,
+          DateTime(2024, 3, 11).millisecondsSinceEpoch,
+          DateTime(2024, 3, 12).millisecondsSinceEpoch,
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('movie-watched-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Déjà vu'), findsOneWidget);
+    expect(find.text('Historique de visionnage'), findsNothing);
   });
 
   testWidgets('sur film revoir (+1 vue) garde le statut vu et incrémente xN', (
@@ -945,6 +1094,29 @@ void main() {
     expect(find.text('Saison déjà vue'), findsOneWidget);
     expect(find.text('Revoir la saison (+1 vue)'), findsOneWidget);
   });
+
+  testWidgets(
+    'sur saison avec rewatch partiel, le dialogue reste sur Marquer non vu',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTitlePage(
+          watchedEpisodes: {'1_1', '1_2'},
+          episodeViewCounts: const {'1_1': 2, '1_2': 1},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Épisodes'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('season-toggle-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saison déjà vue'), findsOneWidget);
+      expect(find.text('Marquer non vu'), findsOneWidget);
+      expect(find.text('Supprimer les derniers rewatches'), findsNothing);
+    },
+  );
 }
 
 class _FakeMediaRepository extends MediaRepository {
@@ -954,9 +1126,11 @@ class _FakeMediaRepository extends MediaRepository {
     required this.status,
     required this.progress,
     required this.episodeViewCounts,
+    this.episodeWatchDates = const {},
     required this.seasonEpisodes,
     this.movieViewCount = 0,
     this.movieFirstWatchedAt,
+    this.movieWatchDates = const [],
   }) : super(
          TmdbApiClient(apiKey: ''),
          TvdbApiClient(apiKey: ''),
@@ -970,10 +1144,13 @@ class _FakeMediaRepository extends MediaRepository {
   final WatchStatus? status;
   final List<RemoteEpisodeProgress> progress;
   final Map<String, int> episodeViewCounts;
+  final Map<String, List<int>> episodeWatchDates;
   final Map<int, List<Episode>> seasonEpisodes;
   final int movieViewCount;
   final int? movieFirstWatchedAt;
+  final List<int> movieWatchDates;
   late int _movieViewCount;
+  late List<int> _movieWatchDates = List<int>.from(movieWatchDates);
 
   @override
   Future<MediaDetails> getMovieDetails(int id) async => details;
@@ -1017,10 +1194,10 @@ class _FakeMediaRepository extends MediaRepository {
     required int mediaId,
     required int seasonNumber,
     required int episodeNumber,
-  }) async => const [];
+  }) async => episodeWatchDates['${seasonNumber}_$episodeNumber'] ?? const [];
 
   @override
-  Future<List<int>> getMovieWatchDates(int mediaId) async => const [];
+  Future<List<int>> getMovieWatchDates(int mediaId) async => _movieWatchDates;
 
   @override
   Future<void> markMovieWatched(
@@ -1030,11 +1207,13 @@ class _FakeMediaRepository extends MediaRepository {
     int? watchedAtMillis,
   }) async {
     _movieViewCount = (_movieViewCount <= 0) ? 1 : _movieViewCount + 1;
+    _movieWatchDates = [..._movieWatchDates, watchedAtMillis ?? 0];
   }
 
   @override
   Future<void> markMovieUnwatched(Media media, WatchCategory category) async {
     _movieViewCount = 0;
+    _movieWatchDates = [];
   }
 
   @override

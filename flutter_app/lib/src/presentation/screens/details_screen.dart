@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -34,7 +36,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Set<String> _watchedEpisodes = {};
   Map<String, int> _episodeWatchedAt = {};
   Map<String, int> _episodeViewCounts = {};
-  Map<String, List<int>> _episodeWatchDates = {};
   int? _movieWatchedAtMillis;
   int _movieViewCount = 0;
   List<int> _movieWatchDates = [];
@@ -69,6 +70,66 @@ class _DetailsScreenState extends State<DetailsScreen> {
       setState(() {
         _showExtendedNextEpisodeCta = showExtended;
       });
+    }
+  }
+
+  Future<void> _refreshProgressState() async {
+    final details = _details;
+    if (details == null) return;
+
+    try {
+      final progressList = await widget.repository.getEpisodeProgress(
+        details.id,
+      );
+      final viewCounts = Map<String, int>.from(
+        await widget.repository.getEpisodeViewCounts(details.id),
+      );
+      final watchedSet = progressList
+          .where((p) => p.isWatched)
+          .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
+          .toSet();
+      final watchedAtMap = {
+        for (final p in progressList.where((p) => p.isWatched))
+          '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
+      };
+      for (final key in watchedSet) {
+        viewCounts.putIfAbsent(key, () => 1);
+      }
+
+      if (details.mediaType == MediaType.movie) {
+        final movieViewCount = await widget.repository.getMovieViewCount(
+          details.id,
+        );
+        final movieDates = movieViewCount > 0
+            ? await widget.repository.getMovieWatchDates(details.id)
+            : const <int>[];
+        final movieFirst = movieViewCount > 0
+            ? await widget.repository.getMovieFirstWatchedAt(details.id)
+            : null;
+        if (!mounted) return;
+        setState(() {
+          _watchedEpisodes = watchedSet;
+          _episodeWatchedAt = watchedAtMap;
+          _episodeViewCounts = viewCounts;
+          _movieViewCount = movieViewCount;
+          _movieWatchDates = movieDates;
+          _movieWatchedAtMillis = movieFirst;
+          _status = movieViewCount > 0
+              ? WatchStatus.watched
+              : WatchStatus.notWatched;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _watchedEpisodes = watchedSet;
+        _episodeWatchedAt = watchedAtMap;
+        _episodeViewCounts = viewCounts;
+      });
+      _updateTvStatus(details);
+    } catch (_) {
+      // Keep the already rendered state and rely on the next full reload.
     }
   }
 
@@ -132,9 +193,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
           details.id,
         );
       }
-      if (details.mediaType == MediaType.tv) {
-        await _loadEpisodeWatchDates(details);
-      }
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -143,31 +201,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
           _loading = false;
         });
       }
-    }
-  }
-
-  Future<void> _loadEpisodeWatchDates(MediaDetails details) async {
-    if (details.seasons.isEmpty) return;
-    final newDates = <String, List<int>>{};
-    for (final season in details.seasons) {
-      for (int ep = 1; ep <= season.episodeCount; ep++) {
-        try {
-          final dates = await widget.repository.getEpisodeWatchDates(
-            mediaId: details.id,
-            seasonNumber: season.seasonNumber,
-            episodeNumber: ep,
-          );
-          if (dates.isNotEmpty) {
-            final key = '${season.seasonNumber}_$ep';
-            newDates[key] = dates;
-          }
-        } catch (_) {}
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _episodeWatchDates = newDates;
-      });
     }
   }
 
@@ -249,17 +282,28 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final wasWatched = _status == WatchStatus.watched;
     var rewatch = false;
     if (!watched && wasWatched) {
-      final choice = await _showRewatchDialog(context, isSeason: false);
+      final dates = _movieWatchDates;
+      final choice = await _showRewatchDialog(
+        context,
+        isSeason: false,
+        watchedDates: dates,
+      );
       if (!mounted || choice == null) return;
       if (choice == _RewatchChoice.rewatch) {
         watched = true;
         rewatch = true;
+      } else if (dates.length > 1) {
+        final selected = await _showWatchDatePickerDialog(dates);
+        if (selected == null) return;
+        await _deleteMovieWatchDate(selected);
+        return;
       }
     }
     final newStatus = watched ? WatchStatus.watched : WatchStatus.notWatched;
     final previousStatus = _status;
     final previousMillis = _movieWatchedAtMillis;
     final previousViewCount = _movieViewCount;
+    final previousWatchDates = List<int>.from(_movieWatchDates);
     final previousTracked = _tracked;
     final nowMillis = DateTime.now().millisecondsSinceEpoch;
     final nextMovieWatchedAt =
@@ -277,6 +321,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
       _status = newStatus;
       _movieWatchedAtMillis = nextMovieWatchedAt;
       _movieViewCount = nextMovieViewCount;
+      if (watched) {
+        _movieWatchDates = wasWatched
+            ? [..._movieWatchDates, nowMillis]
+            : [nowMillis];
+      } else {
+        _movieWatchDates = [];
+      }
     });
     try {
       if (!previousTracked) {
@@ -304,16 +355,24 @@ class _DetailsScreenState extends State<DetailsScreen> {
             _movieWatchedAtMillis = firstWatchAt;
           }
         }
+        await _refreshProgressState();
       } else {
         await widget.repository.markMovieUnwatched(details.toMedia(), category);
       }
       final refreshedMovieViewCount = await widget.repository.getMovieViewCount(
         details.id,
       );
+      final refreshedMovieWatchDates = watched
+          ? await widget.repository.getMovieWatchDates(details.id)
+          : const <int>[];
       if (mounted) {
-        setState(() => _movieViewCount = refreshedMovieViewCount);
+        setState(() {
+          _movieViewCount = refreshedMovieViewCount;
+          _movieWatchDates = refreshedMovieWatchDates;
+        });
       } else {
         _movieViewCount = refreshedMovieViewCount;
+        _movieWatchDates = refreshedMovieWatchDates;
       }
     } catch (e) {
       if (!mounted) return;
@@ -322,6 +381,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         _status = previousStatus;
         _movieWatchedAtMillis = previousMillis;
         _movieViewCount = previousViewCount;
+        _movieWatchDates = previousWatchDates;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Impossible de mettre à jour le film: $e')),
@@ -377,6 +437,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           rewatch: rewatch || wasWatched,
           watchedAtMillis: ts,
         );
+        await _refreshProgressState();
       } else {
         await widget.repository.markEpisodeUnwatched(
           mediaId: details.id,
@@ -737,10 +798,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final alreadyWatched = _watchedEpisodes.contains(key);
     if (episode.seasonNumber == 0) {
       if (!target && alreadyWatched) {
-        final choice = await _showRewatchDialog(context);
+        final dates = await widget.repository.getEpisodeWatchDates(
+          mediaId: details.id,
+          seasonNumber: episode.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+        );
+        final choice = await _showRewatchDialog(context, watchedDates: dates);
         if (!mounted || choice == null) return;
         if (choice == _RewatchChoice.rewatch) {
           await _setEpisodeWatched(episode, true, null, true);
+        } else if (dates.length > 1) {
+          final selected = await _showWatchDatePickerDialog(dates);
+          if (selected == null) return;
+          await _deleteEpisodeWatchDate(episode, selected);
+          return;
         } else {
           await _setEpisodeWatched(episode, false, null, false);
         }
@@ -754,10 +825,19 @@ class _DetailsScreenState extends State<DetailsScreen> {
       return;
     }
     if (!target) {
-      final choice = await _showRewatchDialog(context);
+      final dates = await widget.repository.getEpisodeWatchDates(
+        mediaId: details.id,
+        seasonNumber: episode.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+      );
+      final choice = await _showRewatchDialog(context, watchedDates: dates);
       if (!mounted || choice == null) return;
       if (choice == _RewatchChoice.rewatch) {
         await _setEpisodeWatched(episode, true, null, true);
+      } else if (dates.length > 1) {
+        final selected = await _showWatchDatePickerDialog(dates);
+        if (selected == null) return;
+        await _deleteEpisodeWatchDate(episode, selected);
       } else {
         await _setEpisodeWatched(episode, false, null, false);
       }
@@ -803,14 +883,267 @@ class _DetailsScreenState extends State<DetailsScreen> {
     await _setEpisodeWatched(episode, true, null, false);
   }
 
+  String _formatWatchDateLabel(int millis) {
+    final date = DateTime.fromMillisecondsSinceEpoch(millis);
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
+  Future<int?> _showWatchDatePickerDialog(List<int> dates) {
+    if (dates.isEmpty) return Future<int?>.value(null);
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Supprimer un visionnage'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final watchedAt in dates)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_formatWatchDateLabel(watchedAt)),
+                    trailing: const Icon(Icons.delete_outline_rounded),
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: ctx,
+                        builder: (confirmCtx) => AlertDialog(
+                          backgroundColor: Theme.of(confirmCtx)
+                              .colorScheme
+                              .surfaceContainerHigh,
+                          title: const Text('Confirmer la suppression'),
+                          content: Text(
+                            'Supprimer le visionnage du ${_formatWatchDateLabel(watchedAt)} ?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(false),
+                              child: const Text('Annuler'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(true),
+                              icon: const Icon(Icons.delete_rounded, size: 18),
+                              label: const Text('Supprimer'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        Navigator.of(ctx).pop(watchedAt);
+                      }
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteMovieWatchDate(int watchedAtMillis) async {
+    final details = _details;
+    if (details == null) return;
+    final previousDates = List<int>.from(_movieWatchDates);
+    final previousCount = _movieViewCount;
+    final previousStatus = _status;
+    final previousFirst = _movieWatchedAtMillis;
+    final remaining = _movieWatchDates
+        .where((millis) => millis != watchedAtMillis)
+        .toList();
+    setState(() {
+      _movieWatchDates = remaining;
+      _movieViewCount = remaining.length;
+      _movieWatchedAtMillis = remaining.isNotEmpty ? remaining.first : null;
+      _status = remaining.isNotEmpty
+          ? WatchStatus.watched
+          : WatchStatus.notWatched;
+    });
+    try {
+      await widget.repository.deleteMovieWatchEvent(
+        details.toMedia(),
+        details.watchCategory(),
+        watchedAtMillis: watchedAtMillis,
+      );
+      await _refreshProgressState();
+      final refreshedDates = await widget.repository.getMovieWatchDates(
+        details.id,
+      );
+      final refreshedCount = await widget.repository.getMovieViewCount(
+        details.id,
+      );
+      if (mounted) {
+        setState(() {
+          _movieWatchDates = refreshedDates;
+          _movieViewCount = refreshedCount;
+          _movieWatchedAtMillis = refreshedDates.isNotEmpty
+              ? refreshedDates.first
+              : null;
+          _status = refreshedCount > 0
+              ? WatchStatus.watched
+              : WatchStatus.notWatched;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _movieWatchDates = previousDates;
+        _movieViewCount = previousCount;
+        _movieWatchedAtMillis = previousFirst;
+        _status = previousStatus;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible de supprimer ce visionnage: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteEpisodeWatchDate(
+    Episode episode,
+    int watchedAtMillis,
+  ) async {
+    final details = _details;
+    if (details == null) return;
+    final key = _episodeWatchKey(episode);
+    final previousWatched = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
+    final previousCounts = Map<String, int>.from(_episodeViewCounts);
+    final nextWatched = <String>{..._watchedEpisodes};
+    final nextAt = Map<String, int>.from(_episodeWatchedAt);
+    final nextCounts = Map<String, int>.from(_episodeViewCounts);
+    final remainingDates = (await widget.repository.getEpisodeWatchDates(
+      mediaId: details.id,
+      seasonNumber: episode.seasonNumber,
+      episodeNumber: episode.episodeNumber,
+    )).where((millis) => millis != watchedAtMillis).toList();
+    if (remainingDates.isEmpty) {
+      nextWatched.remove(key);
+      nextAt.remove(key);
+      nextCounts.remove(key);
+    } else {
+      nextWatched.add(key);
+      nextAt[key] = remainingDates.first;
+      nextCounts[key] = remainingDates.length;
+    }
+    setState(() {
+      _watchedEpisodes = nextWatched;
+      _episodeWatchedAt = nextAt;
+      _episodeViewCounts = nextCounts;
+    });
+    _updateTvStatus(details);
+    try {
+      await widget.repository.deleteEpisodeWatchEvent(
+        mediaId: details.id,
+        seasonNumber: episode.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+      await _refreshProgressState();
+      final progress = await widget.repository.getEpisodeProgress(details.id);
+      final viewCounts = Map<String, int>.from(
+        await widget.repository.getEpisodeViewCounts(details.id),
+      );
+      final watchedSet = progress
+          .where((p) => p.isWatched)
+          .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
+          .toSet();
+      final watchedAtMap = {
+        for (final p in progress.where((p) => p.isWatched))
+          '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
+      };
+      if (mounted) {
+        setState(() {
+          _watchedEpisodes = watchedSet;
+          _episodeWatchedAt = watchedAtMap;
+          _episodeViewCounts = viewCounts;
+        });
+        _updateTvStatus(details);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _watchedEpisodes = previousWatched;
+        _episodeWatchedAt = previousAt;
+        _episodeViewCounts = previousCounts;
+      });
+      _updateTvStatus(details);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible de supprimer ce visionnage: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteSeasonLatestRewatches(Season season) async {
+    final details = _details;
+    if (details == null) return;
+    final affectedEpisodes = await widget.repository
+        .getEpisodeNumbersWithRewatches(
+          mediaId: details.id,
+          seasonNumber: season.seasonNumber,
+        );
+    if (affectedEpisodes.isEmpty) return;
+
+    final previousWatched = <String>{..._watchedEpisodes};
+    final previousAt = Map<String, int>.from(_episodeWatchedAt);
+    final previousCounts = Map<String, int>.from(_episodeViewCounts);
+    final nextCounts = Map<String, int>.from(_episodeViewCounts);
+
+    for (final episodeNumber in affectedEpisodes) {
+      final key = '${season.seasonNumber}_$episodeNumber';
+      final currentCount = nextCounts[key];
+      if (currentCount != null && currentCount > 1) {
+        nextCounts[key] = currentCount - 1;
+      }
+    }
+
+    setState(() {
+      _episodeViewCounts = nextCounts;
+    });
+
+    try {
+      await widget.repository.deleteLatestSeasonRewatchEvents(
+        mediaId: details.id,
+        seasonNumber: season.seasonNumber,
+      );
+      await _refreshProgressState();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _watchedEpisodes = previousWatched;
+        _episodeWatchedAt = previousAt;
+        _episodeViewCounts = previousCounts;
+      });
+      _updateTvStatus(details);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Impossible de supprimer les derniers rewatches de la saison: $e',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<_RewatchChoice?> _showRewatchDialog(
     BuildContext context, {
     bool isSeason = false,
+    List<int> watchedDates = const [],
   }) {
     final title = isSeason ? 'Saison déjà vue' : 'Déjà vu';
     final reviewLabel = isSeason
         ? 'Revoir la saison (+1 vue)'
         : 'Revoir (+1 vue)';
+    final hasWatchHistoryDelete = watchedDates.length > 1;
     return showDialog<_RewatchChoice>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -824,7 +1157,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.of(ctx).pop(_RewatchChoice.unwatch),
-            child: const Text('Marquer non vu'),
+            child: Text(
+              hasWatchHistoryDelete
+                  ? 'Supprimer un visionnage'
+                  : 'Marquer non vu',
+            ),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(ctx).pop(_RewatchChoice.rewatch),
@@ -836,61 +1173,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
     );
   }
 
-  void _showEpisodeWatchHistoryDialog(Episode episode) {
-    final key = '${episode.seasonNumber}_${episode.episodeNumber}';
-    final dates = _episodeWatchDates[key] ?? [];
-    if (dates.isEmpty) return;
-
-    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
-    final rewatches = dates.skip(1).toList();
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
-        title: const Text('Historique de visionnage'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
-              ),
-              if (rewatches.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Revues (${rewatches.length}):',
-                  style: Theme.of(ctx).textTheme.labelMedium,
-                ),
-                const SizedBox(height: 8),
-                ...rewatches.map((ms) {
-                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
-                  return Text(
-                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
-                  );
-                }),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showMovieWatchHistoryDialog() {
     if (_movieWatchDates.isEmpty) return;
 
-    final firstDate = DateTime.fromMillisecondsSinceEpoch(
-      _movieWatchDates.first,
-    );
-    final rewatches = _movieWatchDates.skip(1).toList();
+    final dates = List<int>.from(_movieWatchDates)..sort();
+    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
+    final lastDate = DateTime.fromMillisecondsSinceEpoch(dates.last);
+    final rewatches = dates.length > 1
+        ? dates.sublist(1).reversed.toList()
+        : <int>[];
 
     showDialog<void>(
       context: context,
@@ -905,6 +1196,12 @@ class _DetailsScreenState extends State<DetailsScreen> {
               Text(
                 'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
               ),
+              if (dates.length > 1) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Dernier visionnage : ${lastDate.day.toString().padLeft(2, '0')}/${lastDate.month.toString().padLeft(2, '0')}/${lastDate.year}',
+                ),
+              ],
               if (rewatches.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(
@@ -914,8 +1211,57 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 const SizedBox(height: 8),
                 ...rewatches.map((ms) {
                   final dt = DateTime.fromMillisecondsSinceEpoch(ms);
-                  return Text(
-                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Supprimer ce visionnage',
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: ctx,
+                              builder: (confirmCtx) => AlertDialog(
+                                backgroundColor: Theme.of(confirmCtx)
+                                    .colorScheme
+                                    .surfaceContainerHigh,
+                                title: const Text('Confirmer la suppression'),
+                                content: Text(
+                                  'Supprimer le visionnage du ${_formatWatchDateLabel(ms)} ?',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(confirmCtx).pop(false),
+                                    child: const Text('Annuler'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: () =>
+                                        Navigator.of(confirmCtx).pop(true),
+                                    icon: const Icon(
+                                      Icons.delete_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Supprimer'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmed == true) {
+                              if (Navigator.of(ctx).canPop()) {
+                                Navigator.of(ctx).pop();
+                              }
+                              await _deleteMovieWatchDate(ms);
+                            }
+                          },
+                          icon: const Icon(Icons.delete_outline_rounded),
+                        ),
+                      ],
+                    ),
                   );
                 }),
               ],
@@ -989,6 +1335,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ),
       ),
     );
+    if (mounted) {
+      await _refreshProgressState();
+    }
   }
 
   Color? _progressColor() {
@@ -1233,6 +1582,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
                             updatedAtMillis,
                             false,
                           ),
+                      onDeleteEpisodeWatchDate: _deleteEpisodeWatchDate,
+                      onDeleteSeasonLatestRewatches:
+                          _deleteSeasonLatestRewatches,
                       onMarkSeasonWatched: _markSeasonWatched,
                       onRewatchSeason: (targetSeason) => _markSeasonWatched(
                         targetSeason,
@@ -1245,7 +1597,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       onEpisodesLoaded: _onSeasonEpisodesLoaded,
                       jumpRequestToken: _nextEpisodeJumpToken,
                       jumpTargetEpisode: _nextEpisodeTarget,
-                      onShowEpisodeHistory: _showEpisodeWatchHistoryDialog,
                     ),
                 ],
               ),
@@ -1340,7 +1691,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   watchedAtMillis: _movieWatchedAtMillis,
                   movieViewCount: _movieViewCount,
                   onChanged: _setMovieWatched,
-                  onRewatchTap: _movieViewCount > 1
+                  onShowHistory: _movieWatchDates.length > 1
                       ? _showMovieWatchHistoryDialog
                       : null,
                 ),
@@ -1799,7 +2150,7 @@ class _MovieInfoStrip extends StatelessWidget {
     required this.watchedAtMillis,
     required this.movieViewCount,
     required this.onChanged,
-    this.onRewatchTap,
+    this.onShowHistory,
   });
 
   final String? releaseDate;
@@ -1807,7 +2158,7 @@ class _MovieInfoStrip extends StatelessWidget {
   final int? watchedAtMillis;
   final int movieViewCount;
   final ValueChanged<bool> onChanged;
-  final VoidCallback? onRewatchTap;
+  final VoidCallback? onShowHistory;
 
   String _formatDate(String? raw) {
     if (raw == null || raw.isEmpty) return 'Date inconnue';
@@ -1834,24 +2185,31 @@ class _MovieInfoStrip extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                const Icon(Icons.calendar_month_rounded, size: 18),
-                const SizedBox(width: 6),
-                Text(
-                  _formatDate(releaseDate),
-                  style: Theme.of(context).textTheme.bodyMedium,
+                Chip(
+                  avatar: const Icon(Icons.calendar_month_rounded, size: 16),
+                  label: Text(_formatDate(releaseDate)),
                 ),
-                const SizedBox(width: 12),
-                const Icon(Icons.visibility_rounded, size: 18),
-                const SizedBox(width: 6),
-                Text(
-                  isWatched ? _formatMillis(watchedAtMillis) : 'Pas vu',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                Chip(
+                  avatar: const Icon(Icons.visibility_rounded, size: 16),
+                  label: Text(
+                    isWatched ? _formatMillis(watchedAtMillis) : 'Pas vu',
+                  ),
                 ),
+                if (isWatched && movieViewCount > 1 && onShowHistory != null)
+                  ActionChip(
+                    key: const ValueKey('movie-rewatch-history-chip'),
+                    avatar: const Icon(Icons.history_rounded, size: 16),
+                    label: Text('x$movieViewCount vues'),
+                    onPressed: onShowHistory,
+                  ),
               ],
             ),
           ),
+          const SizedBox(width: 8),
           _WatchedToggleButton(
             key: const ValueKey('movie-watched-toggle'),
             checked: isWatched,
@@ -1859,7 +2217,6 @@ class _MovieInfoStrip extends StatelessWidget {
                 ? movieViewCount
                 : null,
             onTap: () => onChanged(!isWatched),
-            onRewatchTap: onRewatchTap,
             tooltip: isWatched
                 ? 'Marquer le film non vu'
                 : 'Marquer le film vu',
@@ -1878,7 +2235,6 @@ class _WatchedToggleButton extends StatelessWidget {
     required this.onTap,
     required this.tooltip,
     this.reviewCount,
-    this.onRewatchTap,
     this.size = 34,
   });
 
@@ -1886,7 +2242,6 @@ class _WatchedToggleButton extends StatelessWidget {
   final VoidCallback? onTap;
   final String tooltip;
   final int? reviewCount;
-  final VoidCallback? onRewatchTap;
   final double size;
 
   @override
@@ -1939,16 +2294,13 @@ class _WatchedToggleButton extends StatelessWidget {
                           ),
                         )
                       : (reviewCount ?? 0) > 1
-                      ? GestureDetector(
-                          onTap: onRewatchTap,
-                          child: Text(
-                            'x${reviewCount!}',
-                            key: ValueKey('review-count-${reviewCount!}'),
-                            style: TextStyle(
-                              color: colorScheme.onPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: size * 0.32,
-                            ),
+                      ? Text(
+                          'x${reviewCount!}',
+                          key: ValueKey('review-count-${reviewCount!}'),
+                          style: TextStyle(
+                            color: colorScheme.onPrimary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: size * 0.32,
                           ),
                         )
                       : Icon(
@@ -1978,6 +2330,8 @@ class _SeasonSection extends StatefulWidget {
     required this.watchedEpisodes,
     required this.episodeViewCounts,
     required this.onToggleEpisode,
+    required this.onDeleteEpisodeWatchDate,
+    required this.onDeleteSeasonLatestRewatches,
     required this.onMarkSeasonWatched,
     required this.onRewatchSeason,
     required this.onMarkOnlySeasonWatched,
@@ -1986,7 +2340,6 @@ class _SeasonSection extends StatefulWidget {
     required this.onEpisodesLoaded,
     required this.jumpRequestToken,
     required this.jumpTargetEpisode,
-    this.onShowEpisodeHistory,
   });
 
   final int mediaId;
@@ -1997,6 +2350,8 @@ class _SeasonSection extends StatefulWidget {
   final Set<String> watchedEpisodes;
   final Map<String, int> episodeViewCounts;
   final Future<void> Function(Episode, bool, int?) onToggleEpisode;
+  final Future<void> Function(Episode, int) onDeleteEpisodeWatchDate;
+  final Future<void> Function(Season) onDeleteSeasonLatestRewatches;
   final Future<void> Function(Season, bool) onMarkSeasonWatched;
   final Future<void> Function(Season) onRewatchSeason;
   final Future<void> Function(Season, bool) onMarkOnlySeasonWatched;
@@ -2006,7 +2361,6 @@ class _SeasonSection extends StatefulWidget {
   onEpisodesLoaded;
   final int jumpRequestToken;
   final Episode? jumpTargetEpisode;
-  final Function(Episode)? onShowEpisodeHistory;
 
   @override
   State<_SeasonSection> createState() => _SeasonSectionState();
@@ -2212,10 +2566,19 @@ class _SeasonSectionState extends State<_SeasonSection> {
   Future<void> _onEpisodeCheckRequest(Episode episode, bool target) async {
     if (!target) {
       if (_isWatched(episode)) {
-        final choice = await _showRewatchEpisodeDialog();
+        final dates = await widget.repository.getEpisodeWatchDates(
+          mediaId: widget.mediaId,
+          seasonNumber: episode.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+        );
+        final choice = await _showRewatchEpisodeDialog(dates);
         if (choice == null) return;
         if (choice == _RewatchChoice.rewatch) {
           await widget.onToggleEpisode(episode, true, null);
+        } else if (dates.length > 1) {
+          final selected = await _showWatchDatePickerDialog(dates);
+          if (selected == null) return;
+          await widget.onDeleteEpisodeWatchDate(episode, selected);
         } else {
           await widget.onToggleEpisode(episode, false, null);
         }
@@ -2309,10 +2672,15 @@ class _SeasonSectionState extends State<_SeasonSection> {
 
   Future<void> _onSeasonCheckRequest(bool target) async {
     if (!target && !_isSpecialSeason && _isSeasonFullyWatched()) {
-      final choice = await _showRewatchSeasonDialog();
+      final hasRewatches = _seasonHasRewatches();
+      final choice = await _showRewatchSeasonDialog(hasRewatches);
       if (choice == null) return;
       if (choice == _RewatchChoice.rewatch) {
         await widget.onRewatchSeason(widget.season);
+      } else if (hasRewatches) {
+        final confirmed = await _showDeleteSeasonRewatchConfirmation();
+        if (confirmed != true) return;
+        await widget.onDeleteSeasonLatestRewatches(widget.season);
       } else {
         await widget.onMarkSeasonWatched(widget.season, false);
       }
@@ -2387,7 +2755,45 @@ class _SeasonSectionState extends State<_SeasonSection> {
     return minCount;
   }
 
-  Future<_RewatchChoice?> _showRewatchEpisodeDialog() {
+  bool _seasonHasRewatches() {
+    if (_episodes.isNotEmpty) {
+      return _episodes.every((episode) => _episodeViewCount(episode) > 1);
+    }
+    if (widget.season.episodeCount <= 0) return false;
+    for (var i = 1; i <= widget.season.episodeCount; i++) {
+      if ((widget.episodeViewCounts['${widget.season.seasonNumber}_$i'] ?? 0) <=
+          1) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<bool?> _showDeleteSeasonRewatchConfirmation() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+        title: const Text('Supprimer les derniers rewatches'),
+        content: const Text(
+          'Cela supprimera le rewatch le plus récent de chaque épisode de cette saison qui en possède au moins un. Continuer ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+            label: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<_RewatchChoice?> _showRewatchEpisodeDialog(List<int> dates) {
     return showDialog<_RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2399,7 +2805,9 @@ class _SeasonSectionState extends State<_SeasonSection> {
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
-            child: const Text('Marquer non vu'),
+            child: Text(
+              dates.length > 1 ? 'Supprimer un visionnage' : 'Marquer non vu',
+            ),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
@@ -2411,7 +2819,75 @@ class _SeasonSectionState extends State<_SeasonSection> {
     );
   }
 
-  Future<_RewatchChoice?> _showRewatchSeasonDialog() {
+  String _formatWatchDateLabel(int millis) {
+    final date = DateTime.fromMillisecondsSinceEpoch(millis);
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
+  Future<int?> _showWatchDatePickerDialog(List<int> dates) {
+    if (dates.isEmpty) return Future<int?>.value(null);
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Supprimer un visionnage'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final watchedAt in dates)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_formatWatchDateLabel(watchedAt)),
+                    trailing: const Icon(Icons.delete_outline_rounded),
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: ctx,
+                        builder: (confirmCtx) => AlertDialog(
+                          backgroundColor: Theme.of(confirmCtx)
+                              .colorScheme
+                              .surfaceContainerHigh,
+                          title: const Text('Confirmer la suppression'),
+                          content: Text(
+                            'Supprimer le visionnage du ${_formatWatchDateLabel(watchedAt)} ?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(false),
+                              child: const Text('Annuler'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(true),
+                              icon: const Icon(Icons.delete_rounded, size: 18),
+                              label: const Text('Supprimer'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        Navigator.of(ctx).pop(watchedAt);
+                      }
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<_RewatchChoice?> _showRewatchSeasonDialog(bool hasRewatches) {
     return showDialog<_RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2423,7 +2899,11 @@ class _SeasonSectionState extends State<_SeasonSection> {
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
-            child: const Text('Marquer non vu'),
+            child: Text(
+              hasRewatches
+                  ? 'Supprimer les derniers rewatches'
+                  : 'Marquer non vu',
+            ),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
@@ -2702,11 +3182,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                           : 'Marquer l\'épisode vu',
                                       onTap: () =>
                                           _onEpisodeCheckRequest(ep, !watched),
-                                      onRewatchTap:
-                                          _episodeReviewCount(ep) != null
-                                          ? () => widget.onShowEpisodeHistory
-                                                ?.call(ep)
-                                          : null,
                                     ),
                             ),
                           ),
@@ -2877,6 +3352,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       if (choice == _RewatchChoice.rewatch) {
         target = true;
       } else {
+        final dates = _episodeWatchDates[k] ?? const <int>[];
+        if (dates.length > 1) {
+          final selected = await _showWatchDatePickerDialog(dates);
+          if (selected == null) return;
+          await _deleteEpisodeWatchDate(ep, selected);
+          return;
+        }
         target = false;
       }
     }
@@ -2899,10 +3381,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       }
     });
     await widget.onToggleWatched(ep, target);
-    if (mounted) setState(_syncFromProgress);
+    if (mounted) {
+      await _loadWatchDates();
+      setState(_syncFromProgress);
+    }
   }
 
   Future<_RewatchChoice?> _showRewatchDialog() {
+    final key = '${_current.seasonNumber}_${_current.episodeNumber}';
+    final dates = _episodeWatchDates[key] ?? const <int>[];
     return showDialog<_RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2914,7 +3401,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
-            child: const Text('Marquer non vu'),
+            child: Text(
+              dates.length > 1 ? 'Supprimer un visionnage' : 'Marquer non vu',
+            ),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
@@ -2924,6 +3413,155 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ],
       ),
     );
+  }
+
+  Future<int?> _showWatchDatePickerDialog(List<int> dates) {
+    if (dates.isEmpty) return Future<int?>.value(null);
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
+        title: const Text('Supprimer un visionnage'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final watchedAt in dates)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      '${DateTime.fromMillisecondsSinceEpoch(watchedAt).day.toString().padLeft(2, '0')}/${DateTime.fromMillisecondsSinceEpoch(watchedAt).month.toString().padLeft(2, '0')}/${DateTime.fromMillisecondsSinceEpoch(watchedAt).year}',
+                    ),
+                    trailing: const Icon(Icons.delete_outline_rounded),
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: ctx,
+                        builder: (confirmCtx) => AlertDialog(
+                          backgroundColor: Theme.of(confirmCtx)
+                              .colorScheme
+                              .surfaceContainerHigh,
+                          title: const Text('Confirmer la suppression'),
+                          content: Text(
+                            'Supprimer le visionnage du ${DateTime.fromMillisecondsSinceEpoch(watchedAt).day.toString().padLeft(2, '0')}/${DateTime.fromMillisecondsSinceEpoch(watchedAt).month.toString().padLeft(2, '0')}/${DateTime.fromMillisecondsSinceEpoch(watchedAt).year} ?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(false),
+                              child: const Text('Annuler'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: () =>
+                                  Navigator.of(confirmCtx).pop(true),
+                              icon: const Icon(Icons.delete_rounded, size: 18),
+                              label: const Text('Supprimer'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        Navigator.of(ctx).pop(watchedAt);
+                      }
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteEpisodeWatchDate(Episode ep, int watchedAtMillis) async {
+    final key = '${ep.seasonNumber}_${ep.episodeNumber}';
+    final previousWatched = Map<String, int>.from(_watchedAtLocal);
+    final previousCounts = Map<String, int>.from(_viewCountsLocal);
+    final previousSelected = Map<String, bool>.from(_watchedLocal);
+    final remainingDates = (_episodeWatchDates[key] ?? const <int>[])
+        .where((millis) => millis != watchedAtMillis)
+        .toList();
+    setState(() {
+      if (remainingDates.isEmpty) {
+        _watchedLocal[key] = false;
+        _watchedAtLocal.remove(key);
+        _viewCountsLocal.remove(key);
+      } else {
+        _watchedLocal[key] = true;
+        _watchedAtLocal[key] = remainingDates.first;
+        _viewCountsLocal[key] = remainingDates.length;
+      }
+    });
+    try {
+      await widget.repository.deleteEpisodeWatchEvent(
+        mediaId: widget.mediaId,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+      final progress = await widget.repository.getEpisodeProgress(
+        widget.mediaId,
+      );
+      final watchedSet = progress
+          .where((p) => p.isWatched)
+          .map((p) => '${p.seasonNumber}_${p.episodeNumber}')
+          .toSet();
+      final watchedAtMap = {
+        for (final p in progress.where((p) => p.isWatched))
+          '${p.seasonNumber}_${p.episodeNumber}': p.updatedAtMillis ?? 0,
+      };
+      final viewCounts = Map<String, int>.from(
+        await widget.repository.getEpisodeViewCounts(widget.mediaId),
+      );
+      if (mounted) {
+        final refreshedDates = <String, List<int>>{};
+        for (final item in widget.episodes) {
+          refreshedDates['${item.seasonNumber}_${item.episodeNumber}'] =
+              await widget.repository.getEpisodeWatchDates(
+                mediaId: widget.mediaId,
+                seasonNumber: item.seasonNumber,
+                episodeNumber: item.episodeNumber,
+              );
+        }
+        setState(() {
+          _watchedLocal = {
+            for (final episode in widget.episodes)
+              '${episode.seasonNumber}_${episode.episodeNumber}': watchedSet
+                  .contains('${episode.seasonNumber}_${episode.episodeNumber}'),
+          };
+          _watchedAtLocal
+            ..clear()
+            ..addAll(watchedAtMap);
+          _viewCountsLocal
+            ..clear()
+            ..addAll(viewCounts);
+          _episodeWatchDates
+            ..clear()
+            ..addAll(refreshedDates);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _watchedLocal = previousSelected;
+        _watchedAtLocal
+          ..clear()
+          ..addAll(previousWatched);
+        _viewCountsLocal
+          ..clear()
+          ..addAll(previousCounts);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible de supprimer ce visionnage: $e')),
+      );
+    }
   }
 
   Future<void> _loadWatchDates() async {
@@ -2949,8 +3587,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final dates = _episodeWatchDates[key] ?? [];
     if (dates.isEmpty) return;
 
-    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
-    final rewatches = dates.skip(1).toList();
+    final sortedDates = List<int>.from(dates)..sort();
+    final firstDate = DateTime.fromMillisecondsSinceEpoch(sortedDates.first);
+    final lastDate = DateTime.fromMillisecondsSinceEpoch(sortedDates.last);
+    final rewatches = sortedDates.length > 1
+        ? sortedDates.sublist(1).reversed.toList()
+        : <int>[];
 
     showDialog<void>(
       context: context,
@@ -2965,6 +3607,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               Text(
                 'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
               ),
+              if (sortedDates.length > 1) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Dernier visionnage : ${lastDate.day.toString().padLeft(2, '0')}/${lastDate.month.toString().padLeft(2, '0')}/${lastDate.year}',
+                ),
+              ],
               if (rewatches.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(
@@ -2974,8 +3622,57 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 const SizedBox(height: 8),
                 ...rewatches.map((ms) {
                   final dt = DateTime.fromMillisecondsSinceEpoch(ms);
-                  return Text(
-                    '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Supprimer ce visionnage',
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (confirmCtx) => AlertDialog(
+                                backgroundColor: Theme.of(confirmCtx)
+                                    .colorScheme
+                                    .surfaceContainerHigh,
+                                title: const Text('Confirmer la suppression'),
+                                content: Text(
+                                  'Supprimer le visionnage du ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ?',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(confirmCtx).pop(false),
+                                    child: const Text('Annuler'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: () =>
+                                        Navigator.of(confirmCtx).pop(true),
+                                    icon: const Icon(
+                                      Icons.delete_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Supprimer'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmed == true) {
+                              await _deleteEpisodeWatchDate(ep, ms);
+                              if (mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.delete_outline_rounded),
+                        ),
+                      ],
+                    ),
                   );
                 }),
               ],

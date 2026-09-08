@@ -1061,7 +1061,7 @@ def list_episode_progress_since(
             since_clause = " AND updated_at > %s"
         cur.execute(
             """
-            SELECT media_id, season_number, episode_number, is_watched, updated_at
+            SELECT media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
             FROM episode_progress
             WHERE user_id = %s AND media_id = %s"""
             + since_clause
@@ -1089,7 +1089,7 @@ def list_all_episode_progress_since(
             since_clause = " AND updated_at > %s"
         cur.execute(
             """
-            SELECT media_id, season_number, episode_number, is_watched, updated_at
+            SELECT media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
             FROM episode_progress
             WHERE user_id = %s"""
             + since_clause
@@ -1234,7 +1234,7 @@ def _set_episode_watched(
     event_at = watched_at or datetime.now(timezone.utc)
     cur.execute(
         """
-        SELECT is_watched, updated_at
+        SELECT is_watched, updated_at, sync_updated_at
         FROM episode_progress
         WHERE user_id = %s AND media_id = %s AND season_number = %s AND episode_number = %s
         LIMIT 1
@@ -1266,13 +1266,14 @@ def _set_episode_watched(
     cur.execute(
         """
         INSERT INTO episode_progress (
-            user_id, media_id, season_number, episode_number, is_watched, updated_at
+            user_id, media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
         )
-        VALUES (%s, %s, %s, %s, TRUE, %s)
+        VALUES (%s, %s, %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, media_id, season_number, episode_number)
         DO UPDATE SET
             is_watched = TRUE,
-            updated_at = LEAST(episode_progress.updated_at, EXCLUDED.updated_at)
+            updated_at = LEAST(episode_progress.updated_at, EXCLUDED.updated_at),
+            sync_updated_at = EXCLUDED.sync_updated_at
         """,
         (user_id, media_id, season_number, episode_number, first_watched_at),
     )
@@ -1291,13 +1292,14 @@ def _set_episode_unwatched(
     cur.execute(
         """
         INSERT INTO episode_progress (
-            user_id, media_id, season_number, episode_number, is_watched, updated_at
+            user_id, media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
         )
-        VALUES (%s, %s, %s, %s, FALSE, CURRENT_TIMESTAMP)
+        VALUES (%s, %s, %s, %s, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, media_id, season_number, episode_number)
         DO UPDATE SET
             is_watched = FALSE,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            sync_updated_at = CURRENT_TIMESTAMP
         """,
         (user_id, media_id, season_number, episode_number),
     )

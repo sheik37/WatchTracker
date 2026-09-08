@@ -137,6 +137,19 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ALTER COLUMN updated_at SET NOT NULL;
                     END IF;
 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'episode_progress' AND column_name = 'sync_updated_at'
+                    ) THEN
+                        ALTER TABLE episode_progress
+                            ADD COLUMN sync_updated_at TIMESTAMPTZ;
+                        UPDATE episode_progress
+                            SET sync_updated_at = updated_at
+                            WHERE sync_updated_at IS NULL;
+                        ALTER TABLE episode_progress
+                            ALTER COLUMN sync_updated_at SET NOT NULL;
+                    END IF;
+
                     CREATE TABLE IF NOT EXISTS watchlist_tombstones (
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                         id INTEGER NOT NULL,

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS episode_progress (
     episode_number INTEGER NOT NULL,
     is_watched BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sync_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, media_id, season_number, episode_number)
 );
 
