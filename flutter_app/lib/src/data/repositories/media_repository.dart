@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'dart:convert';
+
 import '../local/watchtracker_database.dart';
 import '../local/metadata_cache.dart';
 import '../local/offline_sync_queue.dart';
@@ -180,17 +182,33 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.upsertWatchlist(
-        RemoteWatchlistItem(
-          id: media.id,
-          title: media.title,
-          posterPath: media.posterPath,
-          mediaType: media.mediaType.value,
-          contentCategory: category.value,
-          contentStatus: status.value,
-          totalEpisodes: totalEpisodes,
-        ),
-      );
+      try {
+        await backend.upsertWatchlist(
+          RemoteWatchlistItem(
+            id: media.id,
+            title: media.title,
+            posterPath: media.posterPath,
+            mediaType: media.mediaType.value,
+            contentCategory: category.value,
+            contentStatus: status.value,
+            totalEpisodes: totalEpisodes,
+          ),
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.addToWatchlist,
+          payload: jsonEncode({
+            'id': media.id,
+            'title': media.title,
+            'posterPath': media.posterPath,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'status': status.value,
+            'totalEpisodes': totalEpisodes,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -203,11 +221,23 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.deleteWatchlist(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-      );
+      try {
+        await backend.deleteWatchlist(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.removeFromWatchlist,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -225,12 +255,25 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.updateWatchStatus(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-        contentStatus: status.value,
-      );
+      try {
+        await backend.updateWatchStatus(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+          contentStatus: status.value,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.updateWatchStatus,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'status': status.value,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -248,12 +291,25 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.updateWatchTotal(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-        totalEpisodes: totalEpisodes,
-      );
+      try {
+        await backend.updateWatchTotal(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+          totalEpisodes: totalEpisodes,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.updateWatchProgressTotal,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'totalEpisodes': totalEpisodes,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -628,16 +684,30 @@ class MediaRepository {
     }
     final backend = _backendApi;
     if (backend != null) {
-      if (rewatch) {
-        await backend.rewatchEpisodeProgress(
-          mediaId: mediaId,
-          seasonNumber: seasonNumber,
-          episodeNumber: episodeNumber,
-        );
-      } else {
-        await backend.replaceEpisodeProgress(
-          mediaId,
-          await getEpisodeProgress(mediaId),
+      try {
+        if (rewatch) {
+          await backend.rewatchEpisodeProgress(
+            mediaId: mediaId,
+            seasonNumber: seasonNumber,
+            episodeNumber: episodeNumber,
+          );
+        } else {
+          await backend.replaceEpisodeProgress(
+            mediaId,
+            await getEpisodeProgress(mediaId),
+          );
+        }
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.markEpisodeWatched,
+          payload: jsonEncode({
+            'mediaId': mediaId,
+            'seasonNumber': seasonNumber,
+            'episodeNumber': episodeNumber,
+            'rewatch': rewatch,
+            'watchedAtMillis': watchedAtMillis,
+          }),
         );
       }
     }

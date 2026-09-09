@@ -10,6 +10,7 @@ enum OfflineActionType {
   markEpisodeUnwatched,
   markMovieWatched,
   updateWatchStatus,
+  updateWatchProgressTotal,
   deleteEpisodeWatchEvent,
   deleteMovieWatchEvent,
 }
