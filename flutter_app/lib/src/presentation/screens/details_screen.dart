@@ -463,6 +463,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     Season targetSeason,
     bool watched, {
     bool includeAlreadyWatched = false,
+    bool rewatch = false,
   }) async {
     final details = _details;
     if (details == null) return;
@@ -532,6 +533,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       details,
       updates,
       includeAlreadyWatchedForMarked: includeAlreadyWatched,
+      rewatch: rewatch,
     );
   }
 
@@ -617,6 +619,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     List<RemoteEpisodeProgress> updates, {
     int? sharedTimestamp,
     bool includeAlreadyWatchedForMarked = false,
+    bool rewatch = false,
   }) async {
     if (updates.isEmpty) return;
     final previous = <String>{..._watchedEpisodes};
@@ -657,6 +660,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         mediaId: details.id,
         updates: updates,
         includeAlreadyWatchedForMarked: includeAlreadyWatchedForMarked,
+        rewatch: rewatch,
       );
     } catch (e) {
       if (!mounted) return;
@@ -1590,6 +1594,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                         targetSeason,
                         true,
                         includeAlreadyWatched: true,
+                        rewatch: true,
                       ),
                       onMarkOnlySeasonWatched: _markOnlySeasonWatched,
                       onMarkEpisodeUpTo: _markEpisodeUpTo,

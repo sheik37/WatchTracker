@@ -318,6 +318,21 @@ void main() {
           isWatched: true,
         ),
       ]);
+      await client.rewatchMovie(
+        mediaId: 9,
+        mediaType: 'movie',
+        contentCategory: 'films',
+      );
+      await client.rewatchEpisodeProgress(
+        mediaId: 1,
+        seasonNumber: 1,
+        episodeNumber: 3,
+      );
+      await client.rewatchEpisodeSeason(
+        mediaId: 1,
+        seasonNumber: 1,
+        episodeNumbers: const [1, 2, 3],
+      );
       await client.deleteEpisodeProgress(
         mediaId: 1,
         seasonNumber: 1,
@@ -336,6 +351,9 @@ void main() {
           'PATCH https://api.watchtracker.net/watchlist/1/tv/series/status {"content_status":"completed"}',
           'PATCH https://api.watchtracker.net/watchlist/1/tv/series/total-episodes {"total_episodes":20}',
           'PUT https://api.watchtracker.net/episode-progress/1 [{"media_id":1,"season_number":1,"episode_number":3,"is_watched":true}]',
+          'POST https://api.watchtracker.net/watchlist/9/movie/films/rewatch ',
+          'POST https://api.watchtracker.net/episode-progress/1/1/3/rewatch ',
+          'POST https://api.watchtracker.net/episode-progress/1/rewatch-season {"season_number":1,"episode_numbers":[1,2,3]}',
           'DELETE https://api.watchtracker.net/episode-progress/1/1/3 ',
         ]),
       );

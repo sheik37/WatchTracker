@@ -1272,7 +1272,10 @@ def _set_episode_watched(
         ON CONFLICT (user_id, media_id, season_number, episode_number)
         DO UPDATE SET
             is_watched = TRUE,
-            updated_at = LEAST(episode_progress.updated_at, EXCLUDED.updated_at),
+            updated_at = CASE
+                WHEN episode_progress.is_watched THEN LEAST(episode_progress.updated_at, EXCLUDED.updated_at)
+                ELSE EXCLUDED.updated_at
+            END,
             sync_updated_at = EXCLUDED.sync_updated_at
         """,
         (user_id, media_id, season_number, episode_number, first_watched_at),

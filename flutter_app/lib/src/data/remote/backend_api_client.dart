@@ -206,6 +206,43 @@ class BackendApiClient {
     );
   }
 
+  Future<void> rewatchMovie({
+    required int mediaId,
+    required String mediaType,
+    required String contentCategory,
+  }) async {
+    await _requestMap(
+      'POST',
+      '/watchlist/$mediaId/$mediaType/$contentCategory/rewatch',
+    );
+  }
+
+  Future<void> rewatchEpisodeProgress({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    await _requestMap(
+      'POST',
+      '/episode-progress/$mediaId/$seasonNumber/$episodeNumber/rewatch',
+    );
+  }
+
+  Future<void> rewatchEpisodeSeason({
+    required int mediaId,
+    required int seasonNumber,
+    required List<int> episodeNumbers,
+  }) async {
+    await _requestMap(
+      'POST',
+      '/episode-progress/$mediaId/rewatch-season',
+      body: <String, dynamic>{
+        'season_number': seasonNumber,
+        'episode_numbers': episodeNumbers,
+      },
+    );
+  }
+
   Future<void> deleteEpisodeProgress({
     required int mediaId,
     required int seasonNumber,
