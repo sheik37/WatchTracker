@@ -55,6 +55,7 @@ class RemoteEpisodeProgress {
     required this.isWatched,
     this.mediaId,
     this.updatedAtMillis,
+    this.syncUpdatedAtMillis,
   });
 
   final int? mediaId;
@@ -62,6 +63,7 @@ class RemoteEpisodeProgress {
   final int episodeNumber;
   final bool isWatched;
   final int? updatedAtMillis;
+  final int? syncUpdatedAtMillis;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -79,6 +81,7 @@ class RemoteEpisodeProgress {
       episodeNumber: (json['episode_number'] as num).toInt(),
       isWatched: (json['is_watched'] as bool?) ?? false,
       updatedAtMillis: _parseDateMillis(json['updated_at']),
+      syncUpdatedAtMillis: _parseDateMillis(json['sync_updated_at']),
     );
   }
 }

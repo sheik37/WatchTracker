@@ -137,6 +137,19 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ALTER COLUMN updated_at SET NOT NULL;
                     END IF;
 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'episode_progress' AND column_name = 'sync_updated_at'
+                    ) THEN
+                        ALTER TABLE episode_progress
+                            ADD COLUMN sync_updated_at TIMESTAMPTZ;
+                        UPDATE episode_progress
+                            SET sync_updated_at = updated_at
+                            WHERE sync_updated_at IS NULL;
+                        ALTER TABLE episode_progress
+                            ALTER COLUMN sync_updated_at SET NOT NULL;
+                    END IF;
+
                     CREATE TABLE IF NOT EXISTS watchlist_tombstones (
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                         id INTEGER NOT NULL,
@@ -153,6 +166,24 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                         episode_number INTEGER NOT NULL,
                         deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         PRIMARY KEY (user_id, media_id, season_number, episode_number)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS episode_watch_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        media_id INTEGER NOT NULL,
+                        season_number INTEGER NOT NULL,
+                        episode_number INTEGER NOT NULL,
+                        watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+
+                    CREATE TABLE IF NOT EXISTS movie_watch_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        media_id INTEGER NOT NULL,
+                        watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     );
 
                     IF NOT EXISTS (
@@ -290,6 +321,57 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                         ON watchlist_tombstones (user_id, deleted_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_episode_progress_tombstones_user_deleted
                         ON episode_progress_tombstones (user_id, deleted_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_episode_watch_events_lookup
+                        ON episode_watch_events (user_id, media_id, season_number, episode_number, watched_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_movie_watch_events_lookup
+                        ON movie_watch_events (user_id, media_id, watched_at DESC);
+
+                    INSERT INTO episode_watch_events (
+                        user_id,
+                        media_id,
+                        season_number,
+                        episode_number,
+                        watched_at,
+                        created_at
+                    )
+                    SELECT
+                        ep.user_id,
+                        ep.media_id,
+                        ep.season_number,
+                        ep.episode_number,
+                        ep.updated_at,
+                        ep.updated_at
+                    FROM episode_progress ep
+                    WHERE ep.is_watched = true
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM episode_watch_events ev
+                          WHERE ev.user_id = ep.user_id
+                            AND ev.media_id = ep.media_id
+                            AND ev.season_number = ep.season_number
+                            AND ev.episode_number = ep.episode_number
+                      );
+
+                    INSERT INTO movie_watch_events (
+                        user_id,
+                        media_id,
+                        watched_at,
+                        created_at
+                    )
+                    SELECT
+                        w.user_id,
+                        w.id,
+                        w.updated_at,
+                        w.updated_at
+                    FROM watchlist w
+                    WHERE w.media_type = 'movie'
+                      AND w.content_status = 'watched'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM movie_watch_events mv
+                          WHERE mv.user_id = w.user_id
+                            AND mv.media_id = w.id
+                      );
 
                     INSERT INTO password_history (user_id, password_hash, created_at)
                     SELECT u.id, u.password_hash, now()

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
@@ -99,50 +101,95 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
     final token = await _sessionStore.token();
     final refreshToken = await _sessionStore.refreshToken();
     final expiresAt = await _sessionStore.tokenExpiresAtMillis();
-    if (token != null && token.isNotEmpty) {
-      _repository.setBackendAuthToken(token);
-      if (refreshToken != null &&
-          refreshToken.isNotEmpty &&
-          expiresAt != null &&
-          expiresAt <= DateTime.now().millisecondsSinceEpoch + 30 * 1000) {
-        try {
-          final refreshed = await _repository.refresh(refreshToken);
-          await _sessionStore.saveTokens(
-            token: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken,
-            expiresInSeconds: refreshed.expiresInSeconds,
-          );
-          _token = refreshed.accessToken;
-          _refreshToken = refreshed.refreshToken;
-          _repository.setBackendAuthToken(refreshed.accessToken);
-        } catch (_) {
-          await _sessionStore.clearSession();
-          await _repository.clearLocalSessionData();
-          _repository.setBackendAuthToken(null);
-          _token = null;
-        }
-      } else {
-        _token = token;
-        _refreshToken = refreshToken;
-      }
-      if (_token != null) {
-        try {
-          _profile = await _repository.getCurrentUserProfile();
-          if (_profile != null) {
-            await _sessionStore.saveUserProfile(
-              userId: _profile!.userId,
-              email: _profile!.email,
-              displayName: _profile!.displayName,
-            );
-          }
-          await _repository.synchronizeWithBackend();
-        } catch (_) {}
-      }
-    }
     if (mounted) {
-      setState(() => _bootLoading = false);
+      setState(() {
+        _bootLoading = false;
+        if (token != null && token.isNotEmpty) {
+          _token = token;
+          _refreshToken = refreshToken;
+        }
+      });
       _checkForStartupUpdateIfNeeded();
     }
+    if (token == null || token.isEmpty) return;
+    _repository.setBackendAuthToken(token);
+    unawaited(
+      _restoreAuthenticatedSession(
+        refreshToken: refreshToken,
+        expiresAt: expiresAt,
+      ),
+    );
+  }
+
+  Future<void> _restoreAuthenticatedSession({
+    required String? refreshToken,
+    required int? expiresAt,
+  }) async {
+    if (refreshToken != null &&
+        refreshToken.isNotEmpty &&
+        expiresAt != null &&
+        expiresAt <= DateTime.now().millisecondsSinceEpoch + 30 * 1000) {
+      try {
+        final refreshed = await _repository
+            .refresh(refreshToken)
+            .timeout(const Duration(seconds: 15));
+        await _sessionStore.saveTokens(
+          token: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+          expiresInSeconds: refreshed.expiresInSeconds,
+        );
+        if (!mounted) return;
+        setState(() {
+          _token = refreshed.accessToken;
+          _refreshToken = refreshed.refreshToken;
+        });
+        _repository.setBackendAuthToken(refreshed.accessToken);
+      } catch (_) {
+        await _sessionStore.clearSession();
+        await _repository.clearLocalSessionData();
+        _repository.setBackendAuthToken(null);
+        if (!mounted) return;
+        setState(() {
+          _token = null;
+          _refreshToken = null;
+          _profile = null;
+          _showOtpField = false;
+          _showResendVerification = false;
+          _authError = null;
+          _authInfo = null;
+          _retryUntilMillis = null;
+          _attemptsRemaining = null;
+          _resendUntilMillis = null;
+          _forgotUntilMillis = null;
+        });
+        return;
+      }
+    }
+
+    if (!mounted || _token == null) return;
+
+    try {
+      final profile = await _repository.getCurrentUserProfile().timeout(
+        const Duration(seconds: 15),
+      );
+      if (mounted && _token != null && profile != null) {
+        _profile = profile;
+        await _sessionStore.saveUserProfile(
+          userId: profile.userId,
+          email: profile.email,
+          displayName: profile.displayName,
+        );
+        setState(() {});
+      }
+    } catch (_) {}
+
+    unawaited(() async {
+      try {
+        await _repository.synchronizeWithBackend().timeout(
+          const Duration(seconds: 20),
+        );
+      } catch (_) {}
+    }());
   }
 
   void _checkForStartupUpdateIfNeeded() {

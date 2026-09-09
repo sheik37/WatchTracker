@@ -272,6 +272,98 @@ class MediaRepository {
     );
   }
 
+  Future<int?> getMovieFirstWatchedAt(int mediaId) {
+    return _database.firstMovieWatchAt(mediaId);
+  }
+
+  Future<int> getMovieViewCount(int mediaId) {
+    return _database.countMovieWatchEvents(mediaId);
+  }
+
+  Future<List<int>> getEpisodeWatchDates({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) {
+    return _database.getEpisodeWatchDates(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+  }
+
+  Future<List<int>> getMovieWatchDates(int mediaId) {
+    return _database.getMovieWatchDates(mediaId);
+  }
+
+  Future<void> deleteMovieWatchEvent(
+    Media media,
+    WatchCategory category, {
+    required int watchedAtMillis,
+  }) async {
+    await _database.deleteMovieWatchEvent(
+      mediaId: media.id,
+      watchedAtMillis: watchedAtMillis,
+    );
+    final remaining = await getMovieViewCount(media.id);
+    if (remaining == 0) {
+      await updateWatchStatus(media, category, WatchStatus.notWatched);
+      return;
+    }
+    final firstWatchedAt = await getMovieFirstWatchedAt(media.id);
+    if (firstWatchedAt != null) {
+      await updateWatchStatus(media, category, WatchStatus.watched);
+    }
+  }
+
+  Future<void> deleteEpisodeWatchEvent({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    required int watchedAtMillis,
+  }) async {
+    await _database.deleteEpisodeWatchEvent(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      watchedAtMillis: watchedAtMillis,
+    );
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<void> markMovieWatched(
+    Media media,
+    WatchCategory category, {
+    bool rewatch = false,
+    int? watchedAtMillis,
+  }) async {
+    final status = await getWatchStatus(media.id, media.mediaType, category);
+    if (!rewatch && status != WatchStatus.watched) {
+      await _database.addMovieWatchEvent(
+        mediaId: media.id,
+        watchedAtMillis: watchedAtMillis,
+      );
+    } else if (rewatch) {
+      await _database.addMovieWatchEvent(
+        mediaId: media.id,
+        watchedAtMillis: watchedAtMillis,
+      );
+    }
+    await updateWatchStatus(media, category, WatchStatus.watched);
+  }
+
+  Future<void> markMovieUnwatched(Media media, WatchCategory category) async {
+    await _database.clearMovieWatchEvents(media.id);
+    await updateWatchStatus(media, category, WatchStatus.notWatched);
+  }
+
   Future<MediaDetails> getMovieDetails(int id) => _tmdbApi.getMovieDetails(id);
   Future<MediaDetails> getTvDetailsFast(int id) => _tmdbApi.getTvDetails(id);
 
@@ -377,6 +469,7 @@ class MediaRepository {
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
             updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
+            syncUpdatedAtMillis: (row['sync_updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
@@ -404,6 +497,166 @@ class MediaRepository {
       );
     }
     _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeWatched({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+    required bool rewatch,
+    int? watchedAtMillis,
+  }) async {
+    if (rewatch) {
+      await _database.addEpisodeWatchEvent(
+        mediaId: mediaId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+    } else {
+      await _database.markEpisodeWatchedIfNeeded(
+        mediaId: mediaId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        watchedAtMillis: watchedAtMillis,
+      );
+    }
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeUnwatched({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    await _database.clearEpisodeWatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<void> markEpisodeBatch({
+    required int mediaId,
+    required List<RemoteEpisodeProgress> updates,
+    required bool includeAlreadyWatchedForMarked,
+  }) async {
+    if (updates.isEmpty) return;
+    final watchedUpdates = updates
+        .where((u) => u.isWatched)
+        .map(
+          (u) => <String, int>{
+            'season_number': u.seasonNumber,
+            'episode_number': u.episodeNumber,
+          },
+        )
+        .toList();
+    final unwatchedUpdates = updates
+        .where((u) => !u.isWatched)
+        .map(
+          (u) => <String, int>{
+            'season_number': u.seasonNumber,
+            'episode_number': u.episodeNumber,
+          },
+        )
+        .toList();
+    final sharedTs = updates.first.updatedAtMillis;
+    if (watchedUpdates.isNotEmpty) {
+      await _database.addEpisodeWatchEventsBatch(
+        mediaId: mediaId,
+        episodes: watchedUpdates,
+        watchedAtMillis: sharedTs,
+        includeAlreadyWatched: includeAlreadyWatchedForMarked,
+      );
+    }
+    if (unwatchedUpdates.isNotEmpty) {
+      await _database.clearEpisodeWatchEventsBatch(
+        mediaId: mediaId,
+        episodes: unwatchedUpdates,
+      );
+    }
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<List<int>> getEpisodeNumbersWithRewatches({
+    required int mediaId,
+    required int seasonNumber,
+  }) {
+    return _database.episodeNumbersWithRewatches(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+    );
+  }
+
+  Future<void> deleteLatestSeasonRewatchEvents({
+    required int mediaId,
+    required int seasonNumber,
+  }) async {
+    final episodeNumbers = await _database.episodeNumbersWithRewatches(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+    );
+    if (episodeNumbers.isEmpty) return;
+    await _database.deleteLatestEpisodeRewatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumbers: episodeNumbers,
+    );
+    final backend = _backendApi;
+    if (backend != null) {
+      await backend.replaceEpisodeProgress(
+        mediaId,
+        await getEpisodeProgress(mediaId),
+      );
+    }
+    _notifyWatchlistChanged();
+  }
+
+  Future<int> getEpisodeViewCount({
+    required int mediaId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) {
+    return _database.countEpisodeWatchEvents(
+      mediaId: mediaId,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+    );
+  }
+
+  Future<Map<String, int>> getEpisodeViewCounts(int mediaId) async {
+    final rows = await _database.episodeWatchEventCounts(mediaId);
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final season = (row['season_number'] as num?)?.toInt();
+      final episode = (row['episode_number'] as num?)?.toInt();
+      final count = (row['view_count'] as num?)?.toInt() ?? 0;
+      if (season == null || episode == null || count <= 0) continue;
+      counts['${season}_$episode'] = count;
+    }
+    return counts;
   }
 
   Future<void> updateEpisodeProgressBatch({
@@ -568,6 +821,7 @@ class MediaRepository {
             episodeNumber: (row['episode_number'] as num).toInt(),
             isWatched: ((row['is_watched'] as num?)?.toInt() ?? 0) == 1,
             updatedAtMillis: (row['updated_at'] as num?)?.toInt(),
+            syncUpdatedAtMillis: (row['sync_updated_at'] as num?)?.toInt(),
           ),
         )
         .toList();
@@ -594,8 +848,10 @@ class MediaRepository {
       final local = localProgressByKey[key];
       final remote = remoteProgressByKey[key];
       final tombstone = episodeTombstones[key];
-      final localUpdated = local?.updatedAtMillis ?? 0;
-      final remoteUpdated = remote?.updatedAtMillis ?? 0;
+      final localUpdated =
+          local?.syncUpdatedAtMillis ?? local?.updatedAtMillis ?? 0;
+      final remoteUpdated =
+          remote?.syncUpdatedAtMillis ?? remote?.updatedAtMillis ?? 0;
       final deletedByTombstone =
           tombstone != null &&
           tombstone.deletedAtMillis >= localUpdated &&
@@ -613,7 +869,8 @@ class MediaRepository {
         final shouldPushDelete =
             local != null &&
             (sinceMillis == null ||
-                (local.updatedAtMillis ?? 0) > sinceMillis) &&
+                ((local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0) >
+                    sinceMillis)) &&
             (tombstone.deletedAtMillis >= remoteUpdated);
         if (shouldPushDelete) {
           pushEpisodeDeletes.add(tombstone);
@@ -634,7 +891,9 @@ class MediaRepository {
 
       if (local != null) {
         final localWins = remote == null
-            ? sinceMillis == null || (local.updatedAtMillis ?? 0) > sinceMillis
+            ? sinceMillis == null ||
+                  ((local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0) >
+                      sinceMillis)
             : _preferLocalEpisode(local, remote);
         if (localWins) {
           pushProgress.add(local);
@@ -661,6 +920,7 @@ class MediaRepository {
                 'episode_number': u.episodeNumber,
                 'is_watched': u.isWatched ? 1 : 0,
                 'updated_at': u.updatedAtMillis,
+                'sync_updated_at': u.syncUpdatedAtMillis,
               },
             )
             .toList(),
@@ -759,8 +1019,10 @@ class MediaRepository {
     RemoteEpisodeProgress local,
     RemoteEpisodeProgress remote,
   ) {
-    final localUpdated = local.updatedAtMillis ?? 0;
-    final remoteUpdated = remote.updatedAtMillis ?? 0;
+    final localUpdated =
+        local.syncUpdatedAtMillis ?? local.updatedAtMillis ?? 0;
+    final remoteUpdated =
+        remote.syncUpdatedAtMillis ?? remote.updatedAtMillis ?? 0;
     if (localUpdated != remoteUpdated) return localUpdated > remoteUpdated;
     return local.isWatched && !remote.isWatched;
   }
