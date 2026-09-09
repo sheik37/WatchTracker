@@ -483,7 +483,24 @@ class MediaRepository {
       );
       if (cached != null) {
         _lastFetchWasFromCache = true;
-        return _movieMetadataRowToDetails(cached);
+        final base = _movieMetadataRowToDetails(cached);
+        final cachedSeasons = await _metadataCache.getSeasonMetadata(id);
+        if (cachedSeasons.isEmpty) {
+          return base;
+        }
+        return MediaDetails(
+          id: base.id,
+          title: base.title,
+          overview: base.overview,
+          posterPath: base.posterPath,
+          backdropPath: base.backdropPath,
+          releaseDate: base.releaseDate,
+          voteAverage: base.voteAverage,
+          mediaType: base.mediaType,
+          tvStatus: base.tvStatus,
+          genres: base.genres,
+          seasons: _seasonRowsToSeasons(cachedSeasons),
+        );
       }
       rethrow;
     }
@@ -503,14 +520,34 @@ class MediaRepository {
 
   Future<MediaDetails> getTvDetails(int id) async {
     final details = await getTvDetailsFast(id);
-    if (details.watchCategory() != WatchCategory.anime) return details;
+    if (details.watchCategory() != WatchCategory.anime) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
+      return details;
+    }
     final tvdb = _tvdbClient;
-    if (tvdb == null) return details;
+    if (tvdb == null) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
+      return details;
+    }
     try {
       final tvdbId = await _getTvdbId(id);
-      if (tvdbId == null) return details;
+      if (tvdbId == null) {
+        if (details.seasons.isNotEmpty) {
+          await _metadataCache.saveSeasonMetadata(id, details.seasons);
+        }
+        return details;
+      }
       final seasons = await tvdb.getSeasonsWithCounts(tvdbId);
-      if (seasons.isEmpty) return details;
+      if (seasons.isEmpty) {
+        if (details.seasons.isNotEmpty) {
+          await _metadataCache.saveSeasonMetadata(id, details.seasons);
+        }
+        return details;
+      }
       final result = MediaDetails(
         id: details.id,
         title: details.title,
@@ -528,6 +565,9 @@ class MediaRepository {
       await _metadataCache.saveSeasonMetadata(id, seasons);
       return result;
     } catch (_) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
       return details;
     }
   }
@@ -1268,12 +1308,33 @@ class MediaRepository {
     );
   }
 
+  List<Season> _seasonRowsToSeasons(List<SeasonMetadataRow> rows) {
+    return rows
+        .map(
+          (row) => Season(
+            id: row.id ?? 0,
+            name: row.name ?? 'Saison ${row.seasonNumber}',
+            seasonNumber: row.seasonNumber,
+            episodeCount: row.episodeCount ?? 0,
+          ),
+        )
+        .toList();
+  }
+
   Future<void> cleanupMetadataCache() async {
     await _metadataCache.cleanupCache();
   }
 
   Future<void> clearMetadataCache() async {
     await _metadataCache.clearAllCache();
+  }
+
+  Future<int> getCacheMaxSizeBytes() async {
+    return _metadataCache.getMaxCacheSizeBytes();
+  }
+
+  Future<void> setCacheMaxSizeBytes(int bytes) async {
+    await _metadataCache.setMaxCacheSizeBytes(bytes);
   }
 
   Future<void> clearLocalSessionData() async {
