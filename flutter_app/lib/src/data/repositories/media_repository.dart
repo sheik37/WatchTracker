@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 
+import 'dart:convert';
+
 import '../local/watchtracker_database.dart';
 import '../local/metadata_cache.dart';
+import '../local/offline_sync_queue.dart';
 import '../models/auth_models.dart';
 import '../models/backend_models.dart';
 import '../models/details_models.dart';
@@ -18,6 +21,7 @@ class MediaRepository {
     String? backendBaseUrl,
   }) {
     _metadataCache = MetadataCache(_database);
+    _syncQueue = OfflineSyncQueue(_database);
     setBackendBaseUrl(backendBaseUrl);
   }
 
@@ -25,6 +29,7 @@ class MediaRepository {
   final TvdbApiClient? _tvdbClient;
   final WatchTrackerDatabase _database;
   late final MetadataCache _metadataCache;
+  late final OfflineSyncQueue _syncQueue;
   final Map<int, int?> _tvdbIdCache = {};
   final Map<String, List<Episode>> _seasonEpisodesCache = {};
   final Map<String, Future<List<Episode>>> _seasonEpisodesInFlight = {};
@@ -33,6 +38,10 @@ class MediaRepository {
   // Tracks if last fetch was from cache
   bool _lastFetchWasFromCache = false;
   bool get lastFetchWasFromCache => _lastFetchWasFromCache;
+
+  // Getters pour accéder aux services
+  OfflineSyncQueue get syncQueue => _syncQueue;
+  MetadataCache get metadataCache => _metadataCache;
 
   String? _backendBaseUrl;
   String? _backendAuthToken;
@@ -173,17 +182,33 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.upsertWatchlist(
-        RemoteWatchlistItem(
-          id: media.id,
-          title: media.title,
-          posterPath: media.posterPath,
-          mediaType: media.mediaType.value,
-          contentCategory: category.value,
-          contentStatus: status.value,
-          totalEpisodes: totalEpisodes,
-        ),
-      );
+      try {
+        await backend.upsertWatchlist(
+          RemoteWatchlistItem(
+            id: media.id,
+            title: media.title,
+            posterPath: media.posterPath,
+            mediaType: media.mediaType.value,
+            contentCategory: category.value,
+            contentStatus: status.value,
+            totalEpisodes: totalEpisodes,
+          ),
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.addToWatchlist,
+          payload: jsonEncode({
+            'id': media.id,
+            'title': media.title,
+            'posterPath': media.posterPath,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'status': status.value,
+            'totalEpisodes': totalEpisodes,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -196,11 +221,23 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.deleteWatchlist(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-      );
+      try {
+        await backend.deleteWatchlist(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.removeFromWatchlist,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -218,12 +255,25 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.updateWatchStatus(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-        contentStatus: status.value,
-      );
+      try {
+        await backend.updateWatchStatus(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+          contentStatus: status.value,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.updateWatchStatus,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'status': status.value,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -241,12 +291,25 @@ class MediaRepository {
     );
     final backend = _backendApi;
     if (backend != null) {
-      await backend.updateWatchTotal(
-        mediaId: media.id,
-        mediaType: media.mediaType.value,
-        contentCategory: category.value,
-        totalEpisodes: totalEpisodes,
-      );
+      try {
+        await backend.updateWatchTotal(
+          mediaId: media.id,
+          mediaType: media.mediaType.value,
+          contentCategory: category.value,
+          totalEpisodes: totalEpisodes,
+        );
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.updateWatchProgressTotal,
+          payload: jsonEncode({
+            'mediaId': media.id,
+            'mediaType': media.mediaType.value,
+            'category': category.value,
+            'totalEpisodes': totalEpisodes,
+          }),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -420,7 +483,24 @@ class MediaRepository {
       );
       if (cached != null) {
         _lastFetchWasFromCache = true;
-        return _movieMetadataRowToDetails(cached);
+        final base = _movieMetadataRowToDetails(cached);
+        final cachedSeasons = await _metadataCache.getSeasonMetadata(id);
+        if (cachedSeasons.isEmpty) {
+          return base;
+        }
+        return MediaDetails(
+          id: base.id,
+          title: base.title,
+          overview: base.overview,
+          posterPath: base.posterPath,
+          backdropPath: base.backdropPath,
+          releaseDate: base.releaseDate,
+          voteAverage: base.voteAverage,
+          mediaType: base.mediaType,
+          tvStatus: base.tvStatus,
+          genres: base.genres,
+          seasons: _seasonRowsToSeasons(cachedSeasons),
+        );
       }
       rethrow;
     }
@@ -440,14 +520,34 @@ class MediaRepository {
 
   Future<MediaDetails> getTvDetails(int id) async {
     final details = await getTvDetailsFast(id);
-    if (details.watchCategory() != WatchCategory.anime) return details;
+    if (details.watchCategory() != WatchCategory.anime) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
+      return details;
+    }
     final tvdb = _tvdbClient;
-    if (tvdb == null) return details;
+    if (tvdb == null) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
+      return details;
+    }
     try {
       final tvdbId = await _getTvdbId(id);
-      if (tvdbId == null) return details;
+      if (tvdbId == null) {
+        if (details.seasons.isNotEmpty) {
+          await _metadataCache.saveSeasonMetadata(id, details.seasons);
+        }
+        return details;
+      }
       final seasons = await tvdb.getSeasonsWithCounts(tvdbId);
-      if (seasons.isEmpty) return details;
+      if (seasons.isEmpty) {
+        if (details.seasons.isNotEmpty) {
+          await _metadataCache.saveSeasonMetadata(id, details.seasons);
+        }
+        return details;
+      }
       final result = MediaDetails(
         id: details.id,
         title: details.title,
@@ -465,6 +565,9 @@ class MediaRepository {
       await _metadataCache.saveSeasonMetadata(id, seasons);
       return result;
     } catch (_) {
+      if (details.seasons.isNotEmpty) {
+        await _metadataCache.saveSeasonMetadata(id, details.seasons);
+      }
       return details;
     }
   }
@@ -621,16 +724,30 @@ class MediaRepository {
     }
     final backend = _backendApi;
     if (backend != null) {
-      if (rewatch) {
-        await backend.rewatchEpisodeProgress(
-          mediaId: mediaId,
-          seasonNumber: seasonNumber,
-          episodeNumber: episodeNumber,
-        );
-      } else {
-        await backend.replaceEpisodeProgress(
-          mediaId,
-          await getEpisodeProgress(mediaId),
+      try {
+        if (rewatch) {
+          await backend.rewatchEpisodeProgress(
+            mediaId: mediaId,
+            seasonNumber: seasonNumber,
+            episodeNumber: episodeNumber,
+          );
+        } else {
+          await backend.replaceEpisodeProgress(
+            mediaId,
+            await getEpisodeProgress(mediaId),
+          );
+        }
+      } catch (e) {
+        // En cas d'erreur réseau, mettre l'action en queue
+        await _syncQueue.enqueueAction(
+          actionType: OfflineActionType.markEpisodeWatched,
+          payload: jsonEncode({
+            'mediaId': mediaId,
+            'seasonNumber': seasonNumber,
+            'episodeNumber': episodeNumber,
+            'rewatch': rewatch,
+            'watchedAtMillis': watchedAtMillis,
+          }),
         );
       }
     }
@@ -1191,12 +1308,33 @@ class MediaRepository {
     );
   }
 
+  List<Season> _seasonRowsToSeasons(List<SeasonMetadataRow> rows) {
+    return rows
+        .map(
+          (row) => Season(
+            id: row.id ?? 0,
+            name: row.name ?? 'Saison ${row.seasonNumber}',
+            seasonNumber: row.seasonNumber,
+            episodeCount: row.episodeCount ?? 0,
+          ),
+        )
+        .toList();
+  }
+
   Future<void> cleanupMetadataCache() async {
     await _metadataCache.cleanupCache();
   }
 
   Future<void> clearMetadataCache() async {
     await _metadataCache.clearAllCache();
+  }
+
+  Future<int> getCacheMaxSizeBytes() async {
+    return _metadataCache.getMaxCacheSizeBytes();
+  }
+
+  Future<void> setCacheMaxSizeBytes(int bytes) async {
+    await _metadataCache.setMaxCacheSizeBytes(bytes);
   }
 
   Future<void> clearLocalSessionData() async {

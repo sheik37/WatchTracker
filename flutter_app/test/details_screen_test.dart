@@ -93,6 +93,18 @@ void main() {
       Season(id: 200, name: 'Saison 1', seasonNumber: 1, episodeCount: 2),
     ],
   );
+  const titleDetailsWithoutSeasons = MediaDetails(
+    id: 100,
+    title: 'Série swipe',
+    overview: 'Résumé de test',
+    posterPath: null,
+    backdropPath: null,
+    releaseDate: '2024-01-01',
+    voteAverage: 8,
+    mediaType: MediaType.tv,
+    tvStatus: TvStatus.returningSeries,
+    seasons: [],
+  );
   final titleSeasonEpisodes = [
     Episode(
       id: 201,
@@ -288,6 +300,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Breaking Bad'), findsOneWidget);
   });
+
+  testWidgets(
+    'offline sans cache affiche un message explicite et un bouton Réessayer',
+    (tester) async {
+      final repo = _FakeMediaRepository(
+        details: titleDetails,
+        tracked: true,
+        status: WatchStatus.inProgress,
+        progress: const [],
+        episodeViewCounts: const {},
+        seasonEpisodes: const {},
+        detailsError: Exception(
+          'SocketException: Failed host lookup: api.themoviedb.org',
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DetailsScreen(repository: repo, media: titleMedia),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Ce contenu n\'est pas disponible hors-ligne.'),
+        findsOneWidget,
+      );
+      expect(find.text('Réessayer'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'onglet Épisodes affiche un état explicite sans saisons en cache',
+    (tester) async {
+      final repo = _FakeMediaRepository(
+        details: titleDetailsWithoutSeasons,
+        tracked: true,
+        status: WatchStatus.inProgress,
+        progress: const [],
+        episodeViewCounts: const {},
+        seasonEpisodes: const {},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DetailsScreen(repository: repo, media: titleMedia),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Épisodes'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Aucune saison disponible'), findsOneWidget);
+      expect(find.text('Réessayer'), findsOneWidget);
+    },
+  );
 
   testWidgets('displays global episode number', (tester) async {
     await tester.pumpWidget(buildPage(seasonOffsets: {1: 5}));
@@ -1131,6 +1198,7 @@ class _FakeMediaRepository extends MediaRepository {
     this.movieViewCount = 0,
     this.movieFirstWatchedAt,
     this.movieWatchDates = const [],
+    this.detailsError,
   }) : super(
          TmdbApiClient(apiKey: ''),
          TvdbApiClient(apiKey: ''),
@@ -1149,14 +1217,21 @@ class _FakeMediaRepository extends MediaRepository {
   final int movieViewCount;
   final int? movieFirstWatchedAt;
   final List<int> movieWatchDates;
+  final Object? detailsError;
   late int _movieViewCount;
   late List<int> _movieWatchDates = List<int>.from(movieWatchDates);
 
   @override
-  Future<MediaDetails> getMovieDetails(int id) async => details;
+  Future<MediaDetails> getMovieDetails(int id) async {
+    if (detailsError != null) throw detailsError!;
+    return details;
+  }
 
   @override
-  Future<MediaDetails> getTvDetails(int id) async => details;
+  Future<MediaDetails> getTvDetails(int id) async {
+    if (detailsError != null) throw detailsError!;
+    return details;
+  }
 
   @override
   Future<void> prefetchSeasonEpisodes(MediaDetails details) async {}

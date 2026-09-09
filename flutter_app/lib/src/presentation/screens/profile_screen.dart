@@ -5,6 +5,7 @@ import '../../core/app_update_launcher.dart';
 import '../../core/app_update_service.dart';
 import '../../data/models/auth_models.dart';
 import '../../data/repositories/media_repository.dart';
+import 'applications_settings_page.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -477,6 +478,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     if (_showSettings) {
       return _SettingsBody(
+        repository: widget.repository,
         tabIndex: _settingsTab,
         onTabChange: (value) => setState(() => _settingsTab = value),
         displayName: _pendingDisplayName,
@@ -561,6 +563,7 @@ class _ProfileMainBody extends StatelessWidget {
 
 class _SettingsBody extends StatelessWidget {
   const _SettingsBody({
+    required this.repository,
     required this.tabIndex,
     required this.onTabChange,
     required this.displayName,
@@ -577,6 +580,7 @@ class _SettingsBody extends StatelessWidget {
     required this.onLogout,
   });
 
+  final MediaRepository repository;
   final int tabIndex;
   final ValueChanged<int> onTabChange;
   final String displayName;
@@ -792,27 +796,7 @@ class _SettingsBody extends StatelessWidget {
                       );
                     },
                   )
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: const [
-                      Card(
-                        elevation: 1,
-                        child: Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Application'),
-                              SizedBox(height: 8),
-                              Text(
-                                'Configuration de l\'application bientôt disponible.',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                : ApplicationsSettingsPage(repository: repository),
           ),
         ],
       ),

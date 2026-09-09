@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/details_models.dart';
 import 'watchtracker_database.dart';
@@ -12,7 +13,12 @@ class MetadataCache {
 
   // Configuration
   static const int cacheTtlDays = 30;
-  static const int maxCacheSizeBytes = 50 * 1024 * 1024; // 50 MB
+  static const int defaultMaxCacheSizeBytes = 50 * 1024 * 1024; // 50 MB
+  static const int minCacheSizeBytes = 10 * 1024 * 1024; // 10 MB
+  static const int maxCacheSizeBytesLimit = 500 * 1024 * 1024; // 500 MB
+  static const String _maxCacheSizePrefsKey = 'cache_max_size_bytes';
+
+  int? _runtimeMaxCacheSizeBytes;
 
   /// Sauvegarde les métadonnées d'un média
   Future<void> saveMediaMetadata(
@@ -37,6 +43,7 @@ class MetadataCache {
       'cached_at': now,
       'last_accessed_at': now,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _enforceCacheSizeLimit();
   }
 
   /// Récupère les métadonnées d'un média (met à jour last_accessed_at)
@@ -70,6 +77,14 @@ class MetadataCache {
     final db = await _database.database;
     final now = DateTime.now().millisecondsSinceEpoch;
 
+    // Remplace complètement le découpage existant pour éviter les saisons
+    // résiduelles d'une source précédente (TMDB vs TVDB).
+    await db.delete(
+      'season_metadata',
+      where: 'media_id = ?',
+      whereArgs: [mediaId],
+    );
+
     for (final season in seasons) {
       await db.insert('season_metadata', {
         'media_id': mediaId,
@@ -81,6 +96,7 @@ class MetadataCache {
         'last_accessed_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
+    await _enforceCacheSizeLimit();
   }
 
   /// Récupère les métadonnées des saisons
@@ -130,6 +146,7 @@ class MetadataCache {
         'last_accessed_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
+    await _enforceCacheSizeLimit();
   }
 
   /// Récupère les métadonnées des épisodes
@@ -182,10 +199,11 @@ class MetadataCache {
     );
 
     // 2. Vérifier la taille du cache
+    final maxCacheSizeBytes = await getMaxCacheSizeBytes();
     final cacheSize = await _calculateCacheSize();
     if (cacheSize > maxCacheSizeBytes) {
       // Supprimer les moins récemment utilisées
-      await _evictLruItems(cacheSize);
+      await _evictLruItems(cacheSize, maxCacheSizeBytes);
     }
   }
 
@@ -214,8 +232,16 @@ class MetadataCache {
         (episodeCount * episodeSize);
   }
 
+  Future<void> _enforceCacheSizeLimit() async {
+    final maxCacheSizeBytes = await getMaxCacheSizeBytes();
+    final cacheSize = await _calculateCacheSize();
+    if (cacheSize > maxCacheSizeBytes) {
+      await _evictLruItems(cacheSize, maxCacheSizeBytes);
+    }
+  }
+
   /// Supprime les éléments les moins récemment utilisés jusqu'à atteindre la limite
-  Future<void> _evictLruItems(int currentSize) async {
+  Future<void> _evictLruItems(int currentSize, int maxCacheSizeBytes) async {
     final db = await _database.database;
     final targetSize = (maxCacheSizeBytes * 0.8)
         .toInt(); // Garder 80% de capacité
@@ -237,6 +263,31 @@ class MetadataCache {
       DELETE FROM episode_metadata 
       WHERE media_id NOT IN (SELECT id FROM media_metadata)
     ''');
+  }
+
+  Future<int> getMaxCacheSizeBytes() async {
+    final runtimeValue = _runtimeMaxCacheSizeBytes;
+    if (runtimeValue != null) return runtimeValue;
+    final prefs = await SharedPreferences.getInstance();
+    final configured = prefs.getInt(_maxCacheSizePrefsKey);
+    final normalized = _normalizeCacheMaxSize(configured);
+    _runtimeMaxCacheSizeBytes = normalized;
+    return normalized;
+  }
+
+  Future<void> setMaxCacheSizeBytes(int bytes) async {
+    final normalized = _normalizeCacheMaxSize(bytes);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_maxCacheSizePrefsKey, normalized);
+    _runtimeMaxCacheSizeBytes = normalized;
+    await _enforceCacheSizeLimit();
+  }
+
+  int _normalizeCacheMaxSize(int? bytes) {
+    final value = bytes ?? defaultMaxCacheSizeBytes;
+    if (value < minCacheSizeBytes) return minCacheSizeBytes;
+    if (value > maxCacheSizeBytesLimit) return maxCacheSizeBytesLimit;
+    return value;
   }
 
   /// Supprime tout le cache
@@ -261,6 +312,12 @@ class MetadataCache {
     );
 
     return result.isNotEmpty;
+  }
+
+  /// Récupère la taille du cache pour affichage UI
+  /// Utilisé dans les Settings pour montrer l'utilisation
+  Future<int> getCacheSizeForUI() async {
+    return _calculateCacheSize();
   }
 }
 

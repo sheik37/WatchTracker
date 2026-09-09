@@ -48,6 +48,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Episode? _nextEpisodeTarget;
   bool _showExtendedNextEpisodeCta = true;
   bool _navigatingToNextEpisode = false;
+  bool _fetchedFromCache = false;
 
   @override
   void initState() {
@@ -137,11 +138,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _fetchedFromCache = false;
     });
     try {
       final details = widget.media.mediaType == MediaType.movie
           ? await widget.repository.getMovieDetails(widget.media.id)
           : await widget.repository.getTvDetails(widget.media.id);
+      final fetchedFromCache = widget.repository.lastFetchWasFromCache;
       if (details.mediaType == MediaType.tv) {
         unawaited(widget.repository.prefetchSeasonEpisodes(details));
       }
@@ -193,6 +196,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           details.id,
         );
       }
+      _fetchedFromCache = fetchedFromCache;
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -200,8 +204,46 @@ class _DetailsScreenState extends State<DetailsScreen> {
         setState(() {
           _loading = false;
         });
+        if (_fetchedFromCache) {
+          _showOfflineBanner();
+        }
       }
     }
+  }
+
+  void _showOfflineBanner() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '⚠️ Données en cache - Connexion requise pour les infos à jour',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  bool _isOfflineOrServerUnreachableError(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('socketexception') ||
+        normalized.contains('connection') ||
+        normalized.contains('connexion') ||
+        normalized.contains('clientexception') ||
+        normalized.contains('timed out') ||
+        normalized.contains('délai dépassé') ||
+        normalized.contains('impossible de contacter') ||
+        normalized.contains('serveur est accessible');
   }
 
   Future<void> _toggleWatchlist() async {
@@ -1565,46 +1607,51 @@ class _DetailsScreenState extends State<DetailsScreen> {
       child: _showEpisodes
           ? KeyedSubtree(
               key: episodesKey,
-              child: Column(
-                children: [
-                  for (final season in orderedSeasons)
-                    _SeasonSection(
-                      key: PageStorageKey<String>(
-                        'season_${details.id}_${season.seasonNumber}',
-                      ),
-                      mediaId: details.id,
-                      repository: widget.repository,
-                      parentScrollController: _scrollCtrl,
-                      season: season,
-                      seasonOffset: seasonOffsets[season.seasonNumber] ?? 0,
-                      watchedEpisodes: _watchedEpisodes,
-                      episodeViewCounts: _episodeViewCounts,
-                      onToggleEpisode: (episode, watched, updatedAtMillis) =>
-                          _setEpisodeWatched(
-                            episode,
-                            watched,
-                            updatedAtMillis,
-                            false,
+              child: orderedSeasons.isEmpty
+                  ? _buildNoSeasonsState()
+                  : Column(
+                      children: [
+                        for (final season in orderedSeasons)
+                          _SeasonSection(
+                            key: PageStorageKey<String>(
+                              'season_${details.id}_${season.seasonNumber}',
+                            ),
+                            mediaId: details.id,
+                            repository: widget.repository,
+                            parentScrollController: _scrollCtrl,
+                            season: season,
+                            seasonOffset:
+                                seasonOffsets[season.seasonNumber] ?? 0,
+                            watchedEpisodes: _watchedEpisodes,
+                            episodeViewCounts: _episodeViewCounts,
+                            onToggleEpisode:
+                                (episode, watched, updatedAtMillis) =>
+                                    _setEpisodeWatched(
+                                      episode,
+                                      watched,
+                                      updatedAtMillis,
+                                      false,
+                                    ),
+                            onDeleteEpisodeWatchDate: _deleteEpisodeWatchDate,
+                            onDeleteSeasonLatestRewatches:
+                                _deleteSeasonLatestRewatches,
+                            onMarkSeasonWatched: _markSeasonWatched,
+                            onRewatchSeason: (targetSeason) =>
+                                _markSeasonWatched(
+                                  targetSeason,
+                                  true,
+                                  includeAlreadyWatched: true,
+                                  rewatch: true,
+                                ),
+                            onMarkOnlySeasonWatched: _markOnlySeasonWatched,
+                            onMarkEpisodeUpTo: _markEpisodeUpTo,
+                            onOpenEpisode: _openEpisodeDetailPage,
+                            onEpisodesLoaded: _onSeasonEpisodesLoaded,
+                            jumpRequestToken: _nextEpisodeJumpToken,
+                            jumpTargetEpisode: _nextEpisodeTarget,
                           ),
-                      onDeleteEpisodeWatchDate: _deleteEpisodeWatchDate,
-                      onDeleteSeasonLatestRewatches:
-                          _deleteSeasonLatestRewatches,
-                      onMarkSeasonWatched: _markSeasonWatched,
-                      onRewatchSeason: (targetSeason) => _markSeasonWatched(
-                        targetSeason,
-                        true,
-                        includeAlreadyWatched: true,
-                        rewatch: true,
-                      ),
-                      onMarkOnlySeasonWatched: _markOnlySeasonWatched,
-                      onMarkEpisodeUpTo: _markEpisodeUpTo,
-                      onOpenEpisode: _openEpisodeDetailPage,
-                      onEpisodesLoaded: _onSeasonEpisodesLoaded,
-                      jumpRequestToken: _nextEpisodeJumpToken,
-                      jumpTargetEpisode: _nextEpisodeTarget,
+                      ],
                     ),
-                ],
-              ),
             )
           : KeyedSubtree(
               key: aboutKey,
@@ -1616,15 +1663,93 @@ class _DetailsScreenState extends State<DetailsScreen> {
     );
   }
 
+  Widget _buildNoSeasonsState() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Card(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.38),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Icon(
+                Icons.cloud_off_rounded,
+                size: 34,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Aucune saison disponible',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Les données de saisons/épisodes ne sont pas encore en cache pour ce titre. Connecte-toi au réseau puis réessaye.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Réessayer'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading && _details == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_error != null) {
+      final isOffline = _isOfflineOrServerUnreachableError(_error!);
       return Scaffold(
         appBar: AppBar(),
-        body: Center(child: Text(_error!)),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isOffline ? Icons.cloud_off_rounded : Icons.error_outline,
+                  size: 40,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isOffline
+                      ? 'Ce contenu n\'est pas disponible hors-ligne.'
+                      : 'Impossible de charger ce contenu.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  isOffline
+                      ? 'Aucune donnée en cache n\'a été trouvée pour cette série/ce film. Connecte-toi au réseau pour charger les informations.'
+                      : _error!,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Réessayer'),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
     final details = _details;
@@ -2374,6 +2499,7 @@ class _SeasonSection extends StatefulWidget {
 class _SeasonSectionState extends State<_SeasonSection> {
   bool _expanded = false;
   bool _loadingEpisodes = false;
+  bool _episodesLoadFailed = false;
   List<Episode> _episodes = [];
   final ScrollController _episodesScrollCtrl = ScrollController();
   int _lastHandledJumpToken = 0;
@@ -2552,20 +2678,71 @@ class _SeasonSectionState extends State<_SeasonSection> {
       );
       return;
     }
-    setState(() => _loadingEpisodes = true);
+    setState(() {
+      _loadingEpisodes = true;
+      _episodesLoadFailed = false;
+    });
     try {
       final fetched = await widget.repository.getSeasonEpisodes(
         widget.mediaId,
         widget.season.seasonNumber,
       );
       if (!mounted) return;
+      final fetchedFromCache = widget.repository.lastFetchWasFromCache;
       setState(() => _episodes = fetched);
       widget.onEpisodesLoaded(widget.season.seasonNumber, fetched);
+      if (fetchedFromCache) {
+        _showEpisodesOfflineSnackbar();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _episodesLoadFailed = true);
+      final message = e.toString();
+      final friendly = _isOfflineOrServerUnreachableError(message)
+          ? 'Hors-ligne: aucun épisode en cache pour cette saison.'
+          : 'Impossible de charger les épisodes.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(friendly)));
     } finally {
       if (mounted) {
         setState(() => _loadingEpisodes = false);
       }
     }
+  }
+
+  bool _isOfflineOrServerUnreachableError(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('socketexception') ||
+        normalized.contains('connection') ||
+        normalized.contains('connexion') ||
+        normalized.contains('clientexception') ||
+        normalized.contains('timed out') ||
+        normalized.contains('délai dépassé') ||
+        normalized.contains('impossible de contacter') ||
+        normalized.contains('serveur est accessible');
+  }
+
+  void _showEpisodesOfflineSnackbar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '⚠️ Liste d\'épisodes en cache',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _onEpisodeCheckRequest(Episode episode, bool target) async {
@@ -2938,14 +3115,20 @@ class _SeasonSectionState extends State<_SeasonSection> {
               ),
               const SizedBox(height: 10),
               Text(
-                hasEpisodes ? 'Aucun épisode chargé' : 'Saison vide',
+                hasEpisodes
+                    ? (_episodesLoadFailed
+                          ? 'Épisodes indisponibles hors-ligne'
+                          : 'Aucun épisode chargé')
+                    : 'Saison vide',
                 style: Theme.of(context).textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
                 hasEpisodes
-                    ? 'Les épisodes n’ont pas encore été chargés.'
+                    ? (_episodesLoadFailed
+                          ? 'Aucune donnée en cache n\'a été trouvée pour cette saison.'
+                          : 'Les épisodes n’ont pas encore été chargés.')
                     : 'Cette saison ne contient pas d’épisodes.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
@@ -3152,6 +3335,21 @@ class _SeasonSectionState extends State<_SeasonSection> {
                                     : CachedNetworkImage(
                                         imageUrl: ep.stillPath!,
                                         fit: BoxFit.cover,
+                                        placeholder: (_, _) => Center(
+                                          child: SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                          ),
+                                        ),
+                                        errorWidget: (_, _, _) => const Icon(
+                                          Icons.image_not_supported_rounded,
+                                        ),
                                       ),
                               ),
                               title: _isSpecialSeason
@@ -3858,6 +4056,31 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         height: 220,
                         width: double.infinity,
                         fit: BoxFit.cover,
+                        placeholder: (_, _) => Container(
+                          height: 220,
+                          width: double.infinity,
+                          color: Theme.of(context).colorScheme.surfaceContainer,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                        errorWidget: (_, _, _) => Container(
+                          height: 220,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.image_not_supported_rounded,
+                              size: 42,
+                            ),
+                          ),
+                        ),
                       ),
                     )
                   : Container(
