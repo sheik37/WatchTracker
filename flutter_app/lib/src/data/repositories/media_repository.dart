@@ -356,6 +356,14 @@ class MediaRepository {
         watchedAtMillis: watchedAtMillis,
       );
     }
+    final backend = _backendApi;
+    if (backend != null && rewatch) {
+      await backend.rewatchMovie(
+        mediaId: media.id,
+        mediaType: media.mediaType.value,
+        contentCategory: category.value,
+      );
+    }
     await updateWatchStatus(media, category, WatchStatus.watched);
   }
 
@@ -523,10 +531,18 @@ class MediaRepository {
     }
     final backend = _backendApi;
     if (backend != null) {
-      await backend.replaceEpisodeProgress(
-        mediaId,
-        await getEpisodeProgress(mediaId),
-      );
+      if (rewatch) {
+        await backend.rewatchEpisodeProgress(
+          mediaId: mediaId,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber,
+        );
+      } else {
+        await backend.replaceEpisodeProgress(
+          mediaId,
+          await getEpisodeProgress(mediaId),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
@@ -555,6 +571,7 @@ class MediaRepository {
     required int mediaId,
     required List<RemoteEpisodeProgress> updates,
     required bool includeAlreadyWatchedForMarked,
+    bool rewatch = false,
   }) async {
     if (updates.isEmpty) return;
     final watchedUpdates = updates
@@ -592,10 +609,26 @@ class MediaRepository {
     }
     final backend = _backendApi;
     if (backend != null) {
-      await backend.replaceEpisodeProgress(
-        mediaId,
-        await getEpisodeProgress(mediaId),
-      );
+      if (rewatch && unwatchedUpdates.isEmpty && watchedUpdates.isNotEmpty) {
+        final bySeason = <int, List<int>>{};
+        for (final episode in watchedUpdates) {
+          final seasonNumber = episode['season_number']!;
+          final episodeNumber = episode['episode_number']!;
+          bySeason.putIfAbsent(seasonNumber, () => <int>[]).add(episodeNumber);
+        }
+        for (final entry in bySeason.entries) {
+          await backend.rewatchEpisodeSeason(
+            mediaId: mediaId,
+            seasonNumber: entry.key,
+            episodeNumbers: entry.value,
+          );
+        }
+      } else {
+        await backend.replaceEpisodeProgress(
+          mediaId,
+          await getEpisodeProgress(mediaId),
+        );
+      }
     }
     _notifyWatchlistChanged();
   }
