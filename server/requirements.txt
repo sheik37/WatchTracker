@@ -5,42 +5,62 @@
 #    pip-compile --no-index --output-file=requirements-new.txt requirements.txt
 #
 annotated-types==0.8.0
-    # via pydantic
+    # via
+    #   -r requirements.txt
+    #   pydantic
 anyio==4.14.2
     # via
+    #   -r requirements.txt
     #   httpx
     #   starlette
     #   watchfiles
 certifi==2026.7.22
     # via
+    #   -r requirements.txt
     #   httpcore
     #   httpx
 click==8.5.0
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 coverage[toml]==7.16.0
-    # via pytest-cov
+    # via
+    #   -r requirements.txt
+    #   pytest-cov
 fastapi==0.115.6
     # via -r requirements.txt
 h11==0.16.0
     # via
+    #   -r requirements.txt
     #   httpcore
     #   uvicorn
 httpcore==1.0.9
-    # via httpx
+    # via
+    #   -r requirements.txt
+    #   httpx
 httptools==0.8.0
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 httpx==0.28.1
     # via -r requirements.txt
 idna==3.19
     # via
+    #   -r requirements.txt
     #   anyio
     #   httpx
 iniconfig==2.3.0
-    # via pytest
+    # via
+    #   -r requirements.txt
+    #   pytest
 packaging==26.3
-    # via pytest
+    # via
+    #   -r requirements.txt
+    #   pytest
 pluggy==1.6.0
-    # via pytest
+    # via
+    #   -r requirements.txt
+    #   pytest
 psycopg2-binary==2.9.10
     # via -r requirements.txt
 pydantic==2.10.4
@@ -48,7 +68,9 @@ pydantic==2.10.4
     #   -r requirements.txt
     #   fastapi
 pydantic-core==2.27.2
-    # via pydantic
+    # via
+    #   -r requirements.txt
+    #   pydantic
 pytest==8.3.4
     # via
     #   -r requirements.txt
@@ -56,13 +78,20 @@ pytest==8.3.4
 pytest-cov==6.0.0
     # via -r requirements.txt
 python-dotenv==1.2.3
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 pyyaml==6.0.3
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 starlette==0.41.3
-    # via fastapi
+    # via
+    #   -r requirements.txt
+    #   fastapi
 typing-extensions==4.16.0
     # via
+    #   -r requirements.txt
     #   anyio
     #   fastapi
     #   pydantic
@@ -70,8 +99,14 @@ typing-extensions==4.16.0
 uvicorn[standard]==0.34.0
     # via -r requirements.txt
 uvloop==0.22.1
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 watchfiles==1.2.0
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
 websockets==17.1
-    # via uvicorn
+    # via
+    #   -r requirements.txt
+    #   uvicorn
