@@ -11,7 +11,7 @@ class WatchTrackerDatabase {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       path.join(dbPath, 'watchtracker.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE watchlist(
@@ -80,6 +80,60 @@ class WatchTrackerDatabase {
             value INTEGER NOT NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE media_metadata(
+            id INTEGER NOT NULL,
+            media_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            overview TEXT,
+            poster_path TEXT,
+            backdrop_path TEXT,
+            release_date TEXT,
+            vote_average REAL,
+            genres TEXT,
+            tv_status TEXT,
+            cached_at INTEGER NOT NULL,
+            last_accessed_at INTEGER NOT NULL,
+            PRIMARY KEY(id, media_type)
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE season_metadata(
+            media_id INTEGER NOT NULL,
+            season_number INTEGER NOT NULL,
+            id INTEGER,
+            name TEXT,
+            episode_count INTEGER,
+            cached_at INTEGER NOT NULL,
+            last_accessed_at INTEGER NOT NULL,
+            PRIMARY KEY(media_id, season_number)
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE episode_metadata(
+            media_id INTEGER NOT NULL,
+            season_number INTEGER NOT NULL,
+            episode_number INTEGER NOT NULL,
+            id INTEGER,
+            name TEXT,
+            overview TEXT,
+            still_path TEXT,
+            air_date TEXT,
+            runtime INTEGER,
+            cached_at INTEGER NOT NULL,
+            last_accessed_at INTEGER NOT NULL,
+            PRIMARY KEY(media_id, season_number, episode_number)
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_media_metadata_cached_at ON media_metadata(cached_at)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_media_metadata_last_accessed ON media_metadata(last_accessed_at)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
+        );
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -188,6 +242,62 @@ class WatchTrackerDatabase {
           );
           await db.execute(
             'UPDATE episode_progress SET sync_updated_at = updated_at WHERE sync_updated_at IS NULL',
+          );
+        }
+        if (oldVersion < 6) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS media_metadata(
+              id INTEGER NOT NULL,
+              media_type TEXT NOT NULL,
+              title TEXT NOT NULL,
+              overview TEXT,
+              poster_path TEXT,
+              backdrop_path TEXT,
+              release_date TEXT,
+              vote_average REAL,
+              genres TEXT,
+              tv_status TEXT,
+              cached_at INTEGER NOT NULL,
+              last_accessed_at INTEGER NOT NULL,
+              PRIMARY KEY(id, media_type)
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS season_metadata(
+              media_id INTEGER NOT NULL,
+              season_number INTEGER NOT NULL,
+              id INTEGER,
+              name TEXT,
+              episode_count INTEGER,
+              cached_at INTEGER NOT NULL,
+              last_accessed_at INTEGER NOT NULL,
+              PRIMARY KEY(media_id, season_number)
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS episode_metadata(
+              media_id INTEGER NOT NULL,
+              season_number INTEGER NOT NULL,
+              episode_number INTEGER NOT NULL,
+              id INTEGER,
+              name TEXT,
+              overview TEXT,
+              still_path TEXT,
+              air_date TEXT,
+              runtime INTEGER,
+              cached_at INTEGER NOT NULL,
+              last_accessed_at INTEGER NOT NULL,
+              PRIMARY KEY(media_id, season_number, episode_number)
+            )
+          ''');
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_media_metadata_cached_at ON media_metadata(cached_at)',
+          );
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_media_metadata_last_accessed ON media_metadata(last_accessed_at)',
+          );
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
           );
         }
       },

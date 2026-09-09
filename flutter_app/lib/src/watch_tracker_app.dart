@@ -109,6 +109,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _refreshToken = refreshToken;
         }
       });
+      // Cleanup cache in the background
+      unawaited(_repository.cleanupMetadataCache());
       _checkForStartupUpdateIfNeeded();
     }
     if (token == null || token.isEmpty) return;

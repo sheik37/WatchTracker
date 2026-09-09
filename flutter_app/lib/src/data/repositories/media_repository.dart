@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../local/watchtracker_database.dart';
+import '../local/metadata_cache.dart';
 import '../models/auth_models.dart';
 import '../models/backend_models.dart';
 import '../models/details_models.dart';
@@ -16,16 +17,22 @@ class MediaRepository {
     this._database, {
     String? backendBaseUrl,
   }) {
+    _metadataCache = MetadataCache(_database);
     setBackendBaseUrl(backendBaseUrl);
   }
 
   final TmdbApiClient _tmdbApi;
   final TvdbApiClient? _tvdbClient;
   final WatchTrackerDatabase _database;
+  late final MetadataCache _metadataCache;
   final Map<int, int?> _tvdbIdCache = {};
   final Map<String, List<Episode>> _seasonEpisodesCache = {};
   final Map<String, Future<List<Episode>>> _seasonEpisodesInFlight = {};
   final ValueNotifier<int> watchlistVersion = ValueNotifier<int>(0);
+
+  // Tracks if last fetch was from cache
+  bool _lastFetchWasFromCache = false;
+  bool get lastFetchWasFromCache => _lastFetchWasFromCache;
 
   String? _backendBaseUrl;
   String? _backendAuthToken;
@@ -372,8 +379,52 @@ class MediaRepository {
     await updateWatchStatus(media, category, WatchStatus.notWatched);
   }
 
-  Future<MediaDetails> getMovieDetails(int id) => _tmdbApi.getMovieDetails(id);
-  Future<MediaDetails> getTvDetailsFast(int id) => _tmdbApi.getTvDetails(id);
+  Future<MediaDetails> getMovieDetails(int id) async {
+    _lastFetchWasFromCache = false;
+
+    try {
+      // Try to fetch from API
+      final details = await _tmdbApi.getMovieDetails(id);
+      // Save to cache
+      await _metadataCache.saveMediaMetadata(
+        id,
+        MediaType.movie.value,
+        details,
+      );
+      return details;
+    } catch (e) {
+      // Try cache as fallback
+      final cached = await _metadataCache.getMediaMetadata(
+        id,
+        MediaType.movie.value,
+      );
+      if (cached != null) {
+        _lastFetchWasFromCache = true;
+        return _movieMetadataRowToDetails(cached);
+      }
+      rethrow;
+    }
+  }
+
+  Future<MediaDetails> getTvDetailsFast(int id) async {
+    _lastFetchWasFromCache = false;
+
+    try {
+      final details = await _tmdbApi.getTvDetails(id);
+      await _metadataCache.saveMediaMetadata(id, MediaType.tv.value, details);
+      return details;
+    } catch (e) {
+      final cached = await _metadataCache.getMediaMetadata(
+        id,
+        MediaType.tv.value,
+      );
+      if (cached != null) {
+        _lastFetchWasFromCache = true;
+        return _movieMetadataRowToDetails(cached);
+      }
+      rethrow;
+    }
+  }
 
   Future<int?> _getTvdbId(int tmdbId) async {
     if (_tvdbIdCache.containsKey(tmdbId)) return _tvdbIdCache[tmdbId];
@@ -397,7 +448,7 @@ class MediaRepository {
       if (tvdbId == null) return details;
       final seasons = await tvdb.getSeasonsWithCounts(tvdbId);
       if (seasons.isEmpty) return details;
-      return MediaDetails(
+      final result = MediaDetails(
         id: details.id,
         title: details.title,
         overview: details.overview,
@@ -410,6 +461,9 @@ class MediaRepository {
         genres: details.genres,
         seasons: seasons,
       );
+      // Save seasons to cache
+      await _metadataCache.saveSeasonMetadata(id, seasons);
+      return result;
     } catch (_) {
       return details;
     }
@@ -431,13 +485,49 @@ class MediaRepository {
           try {
             episodes = await tvdb.getSeasonEpisodes(tvdbId, seasonNumber);
             _seasonEpisodesCache[cacheKey] = episodes;
+            // Save to persistent cache
+            await _metadataCache.saveEpisodeMetadata(
+              tvId,
+              seasonNumber,
+              episodes,
+            );
             return episodes;
           } catch (_) {}
         }
       }
-      episodes = await _tmdbApi.getSeasonDetails(tvId, seasonNumber);
-      _seasonEpisodesCache[cacheKey] = episodes;
-      return episodes;
+      try {
+        episodes = await _tmdbApi.getSeasonDetails(tvId, seasonNumber);
+        _seasonEpisodesCache[cacheKey] = episodes;
+        // Save to persistent cache
+        await _metadataCache.saveEpisodeMetadata(tvId, seasonNumber, episodes);
+        return episodes;
+      } catch (e) {
+        // Try to load from persistent cache
+        final cachedEpisodes = await _metadataCache.getEpisodeMetadata(
+          tvId,
+          seasonNumber,
+        );
+        if (cachedEpisodes.isNotEmpty) {
+          _lastFetchWasFromCache = true;
+          final episodes = cachedEpisodes
+              .map(
+                (row) => Episode(
+                  id: row.id ?? 0,
+                  name: row.name ?? 'Unknown',
+                  overview: row.overview ?? '',
+                  episodeNumber: row.episodeNumber,
+                  seasonNumber: row.seasonNumber,
+                  stillPath: row.stillPath,
+                  airDate: row.airDate,
+                  runtime: row.runtime,
+                ),
+              )
+              .toList();
+          _seasonEpisodesCache[cacheKey] = episodes;
+          return episodes;
+        }
+        rethrow;
+      }
     })();
     _seasonEpisodesInFlight[cacheKey] = future;
     try {
@@ -1079,6 +1169,35 @@ class MediaRepository {
 
   String _episodeKey(RemoteEpisodeProgress item) =>
       '${item.mediaId}_${item.seasonNumber}_${item.episodeNumber}';
+
+  MediaDetails _movieMetadataRowToDetails(MediaMetadataRow row) {
+    final tvStatus = row.tvStatus != null
+        ? TvStatus.fromApiValue(row.tvStatus)
+        : null;
+    return MediaDetails(
+      id: row.id,
+      title: row.title,
+      overview: row.overview ?? '',
+      posterPath: row.posterPath,
+      backdropPath: row.backdropPath,
+      releaseDate: row.releaseDate,
+      voteAverage: row.voteAverage,
+      mediaType: row.mediaType == MediaType.movie.value
+          ? MediaType.movie
+          : MediaType.tv,
+      tvStatus: tvStatus,
+      genres: row.genres,
+      seasons: const <Season>[],
+    );
+  }
+
+  Future<void> cleanupMetadataCache() async {
+    await _metadataCache.cleanupCache();
+  }
+
+  Future<void> clearMetadataCache() async {
+    await _metadataCache.clearAllCache();
+  }
 
   Future<void> clearLocalSessionData() async {
     await _database.clearSessionData();
