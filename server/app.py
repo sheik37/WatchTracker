@@ -1153,7 +1153,9 @@ def patch_watch_status(
     return row
 
 
-@app.post("/watchlist/{media_id}/{media_type}/{content_category}/rewatch", status_code=204)
+@app.post(
+    "/watchlist/{media_id}/{media_type}/{content_category}/rewatch", status_code=204
+)
 def post_watchlist_rewatch(
     media_id: int,
     media_type: str,
