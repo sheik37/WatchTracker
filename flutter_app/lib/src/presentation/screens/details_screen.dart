@@ -48,6 +48,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Episode? _nextEpisodeTarget;
   bool _showExtendedNextEpisodeCta = true;
   bool _navigatingToNextEpisode = false;
+  bool _fetchedFromCache = false;
 
   @override
   void initState() {
@@ -137,11 +138,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _fetchedFromCache = false;
     });
     try {
       final details = widget.media.mediaType == MediaType.movie
           ? await widget.repository.getMovieDetails(widget.media.id)
           : await widget.repository.getTvDetails(widget.media.id);
+      final fetchedFromCache = widget.repository.lastFetchWasFromCache;
       if (details.mediaType == MediaType.tv) {
         unawaited(widget.repository.prefetchSeasonEpisodes(details));
       }
@@ -193,6 +196,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           details.id,
         );
       }
+      _fetchedFromCache = fetchedFromCache;
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -200,8 +204,34 @@ class _DetailsScreenState extends State<DetailsScreen> {
         setState(() {
           _loading = false;
         });
+        if (_fetchedFromCache) {
+          _showOfflineBanner();
+        }
       }
     }
+  }
+
+  void _showOfflineBanner() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '⚠️ Données en cache - Connexion requise pour les infos à jour',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _toggleWatchlist() async {
@@ -2559,13 +2589,40 @@ class _SeasonSectionState extends State<_SeasonSection> {
         widget.season.seasonNumber,
       );
       if (!mounted) return;
+      final fetchedFromCache = widget.repository.lastFetchWasFromCache;
       setState(() => _episodes = fetched);
       widget.onEpisodesLoaded(widget.season.seasonNumber, fetched);
+      if (fetchedFromCache) {
+        _showEpisodesOfflineSnackbar();
+      }
     } finally {
       if (mounted) {
         setState(() => _loadingEpisodes = false);
       }
     }
+  }
+
+  void _showEpisodesOfflineSnackbar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '⚠️ Liste d\'épisodes en cache',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _onEpisodeCheckRequest(Episode episode, bool target) async {
