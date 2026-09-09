@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../local/watchtracker_database.dart';
 import '../local/metadata_cache.dart';
+import '../local/offline_sync_queue.dart';
 import '../models/auth_models.dart';
 import '../models/backend_models.dart';
 import '../models/details_models.dart';
@@ -18,6 +19,7 @@ class MediaRepository {
     String? backendBaseUrl,
   }) {
     _metadataCache = MetadataCache(_database);
+    _syncQueue = OfflineSyncQueue(_database);
     setBackendBaseUrl(backendBaseUrl);
   }
 
@@ -25,6 +27,7 @@ class MediaRepository {
   final TvdbApiClient? _tvdbClient;
   final WatchTrackerDatabase _database;
   late final MetadataCache _metadataCache;
+  late final OfflineSyncQueue _syncQueue;
   final Map<int, int?> _tvdbIdCache = {};
   final Map<String, List<Episode>> _seasonEpisodesCache = {};
   final Map<String, Future<List<Episode>>> _seasonEpisodesInFlight = {};
@@ -33,6 +36,10 @@ class MediaRepository {
   // Tracks if last fetch was from cache
   bool _lastFetchWasFromCache = false;
   bool get lastFetchWasFromCache => _lastFetchWasFromCache;
+
+  // Getters pour accéder aux services
+  OfflineSyncQueue get syncQueue => _syncQueue;
+  MetadataCache get metadataCache => _metadataCache;
 
   String? _backendBaseUrl;
   String? _backendAuthToken;

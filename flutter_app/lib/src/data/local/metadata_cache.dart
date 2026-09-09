@@ -262,6 +262,12 @@ class MetadataCache {
 
     return result.isNotEmpty;
   }
+
+  /// Récupère la taille du cache pour affichage UI
+  /// Utilisé dans les Settings pour montrer l'utilisation
+  Future<int> getCacheSizeForUI() async {
+    return _calculateCacheSize();
+  }
 }
 
 /// Modèles pour les lignes du cache

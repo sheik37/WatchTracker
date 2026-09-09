@@ -11,7 +11,7 @@ class WatchTrackerDatabase {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       path.join(dbPath, 'watchtracker.db'),
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE watchlist(
@@ -133,6 +133,19 @@ class WatchTrackerDatabase {
         );
         await db.execute(
           'CREATE INDEX idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
+        );
+        await db.execute('''
+          CREATE TABLE pending_actions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            last_retry_at INTEGER
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_pending_actions_created ON pending_actions(created_at)',
         );
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -298,6 +311,21 @@ class WatchTrackerDatabase {
           );
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
+          );
+        }
+        if (oldVersion < 7) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS pending_actions(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              action_type INTEGER NOT NULL,
+              payload TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              last_retry_at INTEGER
+            )
+          ''');
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_pending_actions_created ON pending_actions(created_at)',
           );
         }
       },
