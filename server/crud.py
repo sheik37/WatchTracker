@@ -43,8 +43,8 @@ from auth_crud import (
     verify_email_token,
 )
 from episode_crud import (
-    _set_episode_unwatched,
-    _set_episode_watched,
+    _set_episodes_unwatched_batch,
+    _set_episodes_watched_batch,
     delete_episode_progress,
     list_all_episode_progress,
     list_all_episode_progress_since,
@@ -83,8 +83,8 @@ __all__ = [
     "_issue_access_token",
     "_issue_refresh_token",
     "_issue_session_tokens",
-    "_set_episode_unwatched",
-    "_set_episode_watched",
+    "_set_episodes_unwatched_batch",
+    "_set_episodes_watched_batch",
     "_validate_password_policy",
     "_verify_password",
     "AUTH_REFRESH_TOKEN_PURGE_RETENTION_DAYS",

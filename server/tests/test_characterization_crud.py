@@ -8,7 +8,7 @@ petites doublures qui enregistrent les requêtes SQL exécutées, à l'image de
 """
 
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import auth_crud
 import episode_crud
@@ -16,34 +16,38 @@ from schemas import EpisodeProgressItemIn
 
 
 # ---------------------------------------------------------------------------
-# replace_episode_progress / rewatch_episode_season : une requête par épisode
+# replace_episode_progress / rewatch_episode_season : requêtes SQL groupées
+# (optimisation étape 4, remplace la boucle "une requête par épisode").
 # ---------------------------------------------------------------------------
 
 
-class _EpisodeLoopCursor:
+class _EpisodeBatchCursor:
     """Curseur factice générique : compte les requêtes, sans logique métier."""
 
-    def __init__(self):
+    def __init__(self, existing_rows=None):
         self.executed: list[str] = []
+        self.params: list[tuple] = []
         self._last_sql = ""
+        self._existing_rows = existing_rows or []
 
     def execute(self, sql, params=()):
         self.executed.append(sql)
+        self.params.append(params)
         self._last_sql = sql
 
     def fetchone(self):
-        if "SELECT is_watched, updated_at, sync_updated_at" in self._last_sql:
-            return None  # Aucun épisode existant : pas de "already_watched".
         return None
 
     def fetchall(self):
+        if "SELECT season_number, episode_number, is_watched, updated_at" in self._last_sql:
+            return self._existing_rows
         return []
 
 
-def test_replace_episode_progress_issues_queries_per_episode_before_optimisation(
+def test_replace_episode_progress_issues_grouped_queries_not_one_per_episode(
     monkeypatch,
 ):
-    cur = _EpisodeLoopCursor()
+    cur = _EpisodeBatchCursor()
     monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
     items = [
@@ -53,12 +57,13 @@ def test_replace_episode_progress_issues_queries_per_episode_before_optimisation
     ]
     episode_crud.replace_episode_progress(user_id=1, media_id=99, items=items)
 
-    # Comportement actuel (avant optimisation) : chaque item "watched" émet 4
-    # requêtes (SELECT FOR UPDATE, INSERT watch_events, DELETE tombstone,
-    # UPSERT progress) et chaque item "unwatched" en émet 2 (DELETE
-    # watch_events, UPSERT progress) : une requête par épisode, pas de
-    # regroupement SQL.
-    assert len(cur.executed) == 4 + 4 + 2
+    # Optimisation (étape 4) : les items "watched" sont traités en un seul lot
+    # (1 SELECT FOR UPDATE + 1 INSERT watch_events + 1 DELETE tombstones + 1
+    # UPSERT progress = 4 requêtes pour les 2 épisodes) et les items
+    # "unwatched" en un seul lot (1 DELETE watch_events + 1 UPSERT progress =
+    # 2 requêtes pour 1 épisode), peu importe le nombre d'épisodes : plus
+    # aucune requête par épisode.
+    assert len(cur.executed) == 4 + 2
 
 
 def test_replace_episode_progress_noop_without_db_access_when_no_items(monkeypatch):
@@ -69,25 +74,48 @@ def test_replace_episode_progress_noop_without_db_access_when_no_items(monkeypat
     episode_crud.replace_episode_progress(user_id=1, media_id=99, items=[])
 
 
-def test_rewatch_episode_season_dedupes_sorts_and_loops_per_episode(monkeypatch):
-    calls: list[int] = []
+def test_replace_episode_progress_last_write_wins_on_duplicate_keys(monkeypatch):
+    calls: list[tuple[str, list]] = []
 
-    def fake_set_watched(
-        cur, *, user_id, media_id, season_number, episode_number, allow_rewatch,
-        watched_at=None,
+    def fake_watched_batch(cur, *, user_id, media_id, keys, allow_rewatch, watched_at=None):
+        calls.append(("watched", list(keys)))
+
+    def fake_unwatched_batch(cur, *, user_id, media_id, keys):
+        calls.append(("unwatched", list(keys)))
+
+    monkeypatch.setattr(episode_crud, "_set_episodes_watched_batch", fake_watched_batch)
+    monkeypatch.setattr(episode_crud, "_set_episodes_unwatched_batch", fake_unwatched_batch)
+    monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(object()))
+
+    items = [
+        EpisodeProgressItemIn(season_number=1, episode_number=1, is_watched=True),
+        EpisodeProgressItemIn(season_number=1, episode_number=1, is_watched=False),
+    ]
+    episode_crud.replace_episode_progress(user_id=1, media_id=99, items=items)
+
+    # La dernière entrée du payload pour une clé (saison, épisode) donnée
+    # l'emporte, comme le ferait une boucle séquentielle écrasant la ligne.
+    assert calls == [("unwatched", [(1, 1)])]
+
+
+def test_rewatch_episode_season_dedupes_sorts_and_batches_single_call(monkeypatch):
+    calls: list[list[tuple[int, int]]] = []
+
+    def fake_set_watched_batch(
+        cur, *, user_id, media_id, keys, allow_rewatch, watched_at=None,
     ):
-        calls.append(episode_number)
+        calls.append(list(keys))
 
-    monkeypatch.setattr(episode_crud, "_set_episode_watched", fake_set_watched)
+    monkeypatch.setattr(episode_crud, "_set_episodes_watched_batch", fake_set_watched_batch)
     monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(object()))
 
     episode_crud.rewatch_episode_season(
         user_id=1, media_id=5, season_number=2, episode_numbers=[3, 1, 3, 0, 2]
     )
 
-    # Comportement actuel : dédoublonnage + tri croissant, puis une boucle qui
-    # appelle _set_episode_watched un épisode à la fois (0 est ignoré).
-    assert calls == [1, 2, 3]
+    # Comportement : dédoublonnage + tri croissant, puis un seul appel groupé
+    # (0 est ignoré) au lieu d'une boucle par épisode.
+    assert calls == [[(2, 1), (2, 2), (2, 3)]]
 
 
 def test_rewatch_episode_season_noop_without_db_access_when_all_invalid(monkeypatch):
@@ -275,7 +303,9 @@ def test_change_password_for_user_updates_and_revokes_sessions(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# get_user_id_from_token : comportement ACTUEL = mise à jour systématique
+# get_user_id_from_token : mise à jour de last_used_at limitée dans le temps
+# (optimisation perf, étape 4) : la ligne n'est réécrite que si la dernière
+# mise à jour date de plus de 5 minutes.
 # ---------------------------------------------------------------------------
 
 
@@ -295,16 +325,41 @@ class _AuthTokenCursor:
         return None
 
 
-def test_get_user_id_from_token_always_updates_last_used_at_currently(monkeypatch):
-    cur = _AuthTokenCursor({"user_id": 42})
+def test_get_user_id_from_token_updates_last_used_at_when_missing(monkeypatch):
+    cur = _AuthTokenCursor({"user_id": 42, "last_used_at": None})
     monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
     assert auth_crud.get_user_id_from_token("tok") == 42
     update_calls = [
         sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
     ]
-    # Comportement actuel (avant optimisation) : la mise à jour est
-    # inconditionnelle, à chaque appel, même si last_used_at est récent.
+    assert len(update_calls) == 1
+
+
+def test_get_user_id_from_token_skips_update_when_recently_used(monkeypatch):
+    cur = _AuthTokenCursor(
+        {"user_id": 42, "last_used_at": datetime.now(timezone.utc)}
+    )
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+
+    assert auth_crud.get_user_id_from_token("tok") == 42
+    update_calls = [
+        sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
+    ]
+    # Optimisation : pas d'écriture si last_used_at date de moins de 5 min.
+    assert update_calls == []
+    assert len(cur.executed) == 1  # seul le SELECT est exécuté
+
+
+def test_get_user_id_from_token_updates_when_last_used_is_old(monkeypatch):
+    stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+    cur = _AuthTokenCursor({"user_id": 42, "last_used_at": stale})
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+
+    assert auth_crud.get_user_id_from_token("tok") == 42
+    update_calls = [
+        sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
+    ]
     assert len(update_calls) == 1
 
 

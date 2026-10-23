@@ -1,3 +1,5 @@
+import contextlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -70,6 +72,9 @@ def test_health():
 
 def test_watchlist_endpoints(monkeypatch):
     monkeypatch.setattr(
+        sync_router.sync_crud, "cursor", lambda: contextlib.nullcontext(object())
+    )
+    monkeypatch.setattr(
         watchlist_router.watchlist_crud,
         "list_watchlist_since",
         lambda user_id, content_category=None, since=None: [
@@ -77,28 +82,28 @@ def test_watchlist_endpoints(monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        sync_router.watchlist_crud,
+        sync_router.sync_crud.watchlist_crud,
         "list_watchlist_since",
-        lambda user_id, content_category=None, since=None: [
+        lambda user_id, content_category=None, since=None, cur=None: [
             {"id": 1, "title": "Bleach"}
         ],
     )
     monkeypatch.setattr(
-        sync_router.episode_crud,
+        sync_router.sync_crud.episode_crud,
         "list_all_episode_progress_since",
-        lambda user_id, since=None: [
+        lambda user_id, since=None, cur=None: [
             {"media_id": 1, "season_number": 1, "episode_number": 1, "is_watched": True}
         ],
     )
     monkeypatch.setattr(
-        sync_router.watchlist_crud,
+        sync_router.sync_crud.watchlist_crud,
         "list_watchlist_tombstones_since",
-        lambda user_id, since=None: [],
+        lambda user_id, since=None, cur=None: [],
     )
     monkeypatch.setattr(
-        sync_router.episode_crud,
+        sync_router.sync_crud.episode_crud,
         "list_episode_progress_tombstones_since",
-        lambda user_id, since=None: [],
+        lambda user_id, since=None, cur=None: [],
     )
     monkeypatch.setattr(
         watchlist_router.watchlist_crud,
@@ -127,36 +132,49 @@ def test_watchlist_endpoints(monkeypatch):
     assert payload["episode_progress"][0]["media_id"] == 1
 
 
-def test_sync_snapshot_reads_are_four_separate_sequential_crud_calls(monkeypatch):
-    # Caractérise le comportement ACTUEL (avant optimisation) : /sync/snapshot
-    # effectue 4 lectures indépendantes, une par fonction crud, plutôt qu'une
-    # seule fonction ouvrant une unique connexion/transaction.
+def test_sync_snapshot_reads_share_a_single_connection_and_transaction(monkeypatch):
+    # Optimisation (étape 4) : /sync/snapshot regroupe les 4 lectures dans
+    # sync_crud.get_sync_snapshot_data(), qui ouvre une seule
+    # connexion/transaction (un seul `with cursor()`) au lieu de 4 lectures
+    # CRUD séquentielles ouvrant chacune leur propre connexion.
     calls = []
+    opened_cursors = []
+
+    class _FakeCursor:
+        pass
+
+    fake_cursor_instance = _FakeCursor()
+    monkeypatch.setattr(
+        sync_router.sync_crud,
+        "cursor",
+        lambda: contextlib.nullcontext(fake_cursor_instance),
+    )
 
     def record(name):
-        def _inner(*args, **kwargs):
+        def _inner(*args, cur=None, **kwargs):
             calls.append(name)
+            opened_cursors.append(cur)
             return []
 
         return _inner
 
     monkeypatch.setattr(
-        sync_router.watchlist_crud,
+        sync_router.sync_crud.watchlist_crud,
         "list_watchlist_since",
         record("list_watchlist_since"),
     )
     monkeypatch.setattr(
-        sync_router.episode_crud,
+        sync_router.sync_crud.episode_crud,
         "list_all_episode_progress_since",
         record("list_all_episode_progress_since"),
     )
     monkeypatch.setattr(
-        sync_router.watchlist_crud,
+        sync_router.sync_crud.watchlist_crud,
         "list_watchlist_tombstones_since",
         record("list_watchlist_tombstones_since"),
     )
     monkeypatch.setattr(
-        sync_router.episode_crud,
+        sync_router.sync_crud.episode_crud,
         "list_episode_progress_tombstones_since",
         record("list_episode_progress_tombstones_since"),
     )
@@ -169,6 +187,9 @@ def test_sync_snapshot_reads_are_four_separate_sequential_crud_calls(monkeypatch
         "list_watchlist_tombstones_since",
         "list_episode_progress_tombstones_since",
     ]
+    # Les 4 lectures partagent le même curseur/connexion (une seule ouverture).
+    assert len(set(id(c) for c in opened_cursors)) == 1
+    assert all(c is not None for c in opened_cursors)
 
 
 def test_watchlist_movie_rewatch_endpoint(monkeypatch):

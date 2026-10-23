@@ -1,5 +1,6 @@
 """Accès base de données pour la watchlist (films/séries/anime)."""
 
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -17,16 +18,19 @@ def list_watchlist_since(
     user_id: int,
     content_category: Optional[str] = None,
     since: Optional[datetime] = None,
+    cur: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
+    # ``cur`` permet de réutiliser une connexion/transaction déjà ouverte
+    # (voir sync_crud.get_sync_snapshot_data) au lieu d'en ouvrir une nouvelle.
     params: list[Any] = [user_id]
     since_clause = ""
     if since is not None:
         params.append(since)
         since_clause = " AND updated_at > %s"
-    if content_category:
-        params.append(content_category)
-        with cursor() as cur:
-            cur.execute(
+    with nullcontext(cur) if cur is not None else cursor() as c:
+        if content_category:
+            params.append(content_category)
+            c.execute(
                 """
                 SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
                 FROM watchlist
@@ -38,10 +42,9 @@ def list_watchlist_since(
                 """,
                 tuple(params),
             )
-            return list(cur.fetchall())
+            return list(c.fetchall())
 
-    with cursor() as cur:
-        cur.execute(
+        c.execute(
             """
             SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             FROM watchlist
@@ -52,7 +55,7 @@ def list_watchlist_since(
             """,
             tuple(params),
         )
-        return list(cur.fetchall())
+        return list(c.fetchall())
 
 
 def upsert_watchlist(user_id: int, item: WatchlistItemIn) -> dict[str, Any]:
@@ -234,14 +237,15 @@ def list_watchlist_tombstones(user_id: int) -> list[dict[str, Any]]:
 def list_watchlist_tombstones_since(
     user_id: int,
     since: Optional[datetime] = None,
+    cur: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
-    with cursor() as cur:
+    with nullcontext(cur) if cur is not None else cursor() as c:
         params: list[Any] = [user_id]
         since_clause = ""
         if since is not None:
             params.append(since)
             since_clause = " AND deleted_at > %s"
-        cur.execute(
+        c.execute(
             """
             SELECT id, media_type, content_category, deleted_at
             FROM watchlist_tombstones
@@ -252,4 +256,4 @@ def list_watchlist_tombstones_since(
             """,
             tuple(params),
         )
-        return list(cur.fetchall())
+        return list(c.fetchall())

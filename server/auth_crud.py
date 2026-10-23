@@ -577,12 +577,15 @@ def change_password_for_user(
         return "updated"
 
 
+LAST_USED_AT_THROTTLE_SECONDS = 300
+
+
 def get_user_id_from_token(token: str) -> Optional[int]:
     token_hash = _hash_token(token)
     with cursor() as cur:
         cur.execute(
             """
-            SELECT user_id
+            SELECT user_id, last_used_at
             FROM auth_tokens
             WHERE token_hash = %s
               AND revoked_at IS NULL
@@ -594,12 +597,26 @@ def get_user_id_from_token(token: str) -> Optional[int]:
         row = cur.fetchone()
         if row is None:
             return None
-        cur.execute(
-            """
-            UPDATE auth_tokens
-            SET last_used_at = now()
-            WHERE token_hash = %s
-            """,
-            (token_hash,),
-        )
+        last_used_at = row["last_used_at"]
+        # Optimisation : n'écrire last_used_at que si la dernière mise à
+        # jour date de plus de LAST_USED_AT_THROTTLE_SECONDS, pour éviter une
+        # écriture à chaque requête authentifiée.
+        if last_used_at is None or (
+            datetime.now(timezone.utc) - _as_aware_utc(last_used_at)
+            >= timedelta(seconds=LAST_USED_AT_THROTTLE_SECONDS)
+        ):
+            cur.execute(
+                """
+                UPDATE auth_tokens
+                SET last_used_at = now()
+                WHERE token_hash = %s
+                """,
+                (token_hash,),
+            )
         return row["user_id"]
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
