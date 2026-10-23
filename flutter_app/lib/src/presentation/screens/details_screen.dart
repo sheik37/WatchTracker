@@ -13,8 +13,9 @@ import '../../data/models/details_models.dart';
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
 import '../theme/slide_up_route.dart';
-
-enum _RewatchChoice { unwatch, rewatch }
+import 'details/media_header.dart';
+import 'details/rewatch_choice.dart';
+import 'details/watch_history_dialog.dart';
 
 class DetailsScreen extends StatefulWidget {
   const DetailsScreen({
@@ -322,7 +323,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         watchedDates: dates,
       );
       if (!mounted || choice == null) return;
-      if (choice == _RewatchChoice.rewatch) {
+      if (choice == RewatchChoice.rewatch) {
         watched = true;
         rewatch = true;
       } else if (dates.length > 1) {
@@ -842,7 +843,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         );
         final choice = await _showRewatchDialog(context, watchedDates: dates);
         if (!mounted || choice == null) return;
-        if (choice == _RewatchChoice.rewatch) {
+        if (choice == RewatchChoice.rewatch) {
           await _setEpisodeWatched(episode, true, null, true);
         } else if (dates.length > 1) {
           final selected = await _showWatchDatePickerDialog(dates);
@@ -869,7 +870,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       );
       final choice = await _showRewatchDialog(context, watchedDates: dates);
       if (!mounted || choice == null) return;
-      if (choice == _RewatchChoice.rewatch) {
+      if (choice == RewatchChoice.rewatch) {
         await _setEpisodeWatched(episode, true, null, true);
       } else if (dates.length > 1) {
         final selected = await _showWatchDatePickerDialog(dates);
@@ -1166,7 +1167,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  Future<_RewatchChoice?> _showRewatchDialog(
+  Future<RewatchChoice?> _showRewatchDialog(
     BuildContext context, {
     bool isSeason = false,
     List<int> watchedDates = const [],
@@ -1176,7 +1177,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ? 'Revoir la saison (+1 vue)'
         : 'Revoir (+1 vue)';
     final hasWatchHistoryDelete = watchedDates.length > 1;
-    return showDialog<_RewatchChoice>(
+    return showDialog<RewatchChoice>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
@@ -1188,7 +1189,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ),
         actions: [
           OutlinedButton(
-            onPressed: () => Navigator.of(ctx).pop(_RewatchChoice.unwatch),
+            onPressed: () => Navigator.of(ctx).pop(RewatchChoice.unwatch),
             child: Text(
               hasWatchHistoryDelete
                   ? 'Supprimer un visionnage'
@@ -1196,7 +1197,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
             ),
           ),
           FilledButton.icon(
-            onPressed: () => Navigator.of(ctx).pop(_RewatchChoice.rewatch),
+            onPressed: () => Navigator.of(ctx).pop(RewatchChoice.rewatch),
             icon: const Icon(Icons.replay_rounded, size: 18),
             label: Text(reviewLabel),
           ),
@@ -1208,105 +1209,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
   void _showMovieWatchHistoryDialog() {
     if (_movieWatchDates.isEmpty) return;
 
-    final dates = List<int>.from(_movieWatchDates)..sort();
-    final firstDate = DateTime.fromMillisecondsSinceEpoch(dates.first);
-    final lastDate = DateTime.fromMillisecondsSinceEpoch(dates.last);
-    final rewatches = dates.length > 1
-        ? dates.sublist(1).reversed.toList()
-        : <int>[];
-
-    showDialog<void>(
+    showWatchHistoryDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainerHigh,
-        title: const Text('Historique de visionnage'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
-              ),
-              if (dates.length > 1) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Dernier visionnage : ${lastDate.day.toString().padLeft(2, '0')}/${lastDate.month.toString().padLeft(2, '0')}/${lastDate.year}',
-                ),
-              ],
-              if (rewatches.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Revues (${rewatches.length}):',
-                  style: Theme.of(ctx).textTheme.labelMedium,
-                ),
-                const SizedBox(height: 8),
-                ...rewatches.map((ms) {
-                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Supprimer ce visionnage',
-                          onPressed: () async {
-                            final confirmed = await showDialog<bool>(
-                              context: ctx,
-                              builder: (confirmCtx) => AlertDialog(
-                                backgroundColor: Theme.of(confirmCtx)
-                                    .colorScheme
-                                    .surfaceContainerHigh,
-                                title: const Text('Confirmer la suppression'),
-                                content: Text(
-                                  'Supprimer le visionnage du ${formatWatchDateLabel(ms)} ?',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(confirmCtx).pop(false),
-                                    child: const Text('Annuler'),
-                                  ),
-                                  FilledButton.icon(
-                                    onPressed: () =>
-                                        Navigator.of(confirmCtx).pop(true),
-                                    icon: const Icon(
-                                      Icons.delete_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Supprimer'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true) {
-                              if (Navigator.of(ctx).canPop()) {
-                                Navigator.of(ctx).pop();
-                              }
-                              await _deleteMovieWatchDate(ms);
-                            }
-                          },
-                          icon: const Icon(Icons.delete_outline_rounded),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
+      dates: _movieWatchDates,
+      onDeleteDate: _deleteMovieWatchDate,
+      closeDialogBeforeDelete: true,
     );
   }
 
@@ -1921,7 +1828,7 @@ class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
           left: 0,
           right: 0,
           bottom: isTV ? _tabsHeight : 0,
-          child: _MediaHeader(
+          child: MediaHeader(
             details: details,
             contentAlpha: contentAlpha,
             progressColor: progressColor,
@@ -1999,139 +1906,6 @@ class _DetailsHeaderDelegate extends SliverPersistentHeaderDelegate {
       ],
     );
   }
-}
-
-class _MediaHeader extends StatelessWidget {
-  const _MediaHeader({
-    required this.details,
-    required this.contentAlpha,
-    this.progressColor,
-    this.progressValue,
-    this.watchedGlobal,
-    this.totalGlobal,
-  });
-
-  final MediaDetails details;
-  final double contentAlpha;
-  final Color? progressColor;
-  final double? progressValue;
-  final int? watchedGlobal;
-  final int? totalGlobal;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (details.backdropPath != null || details.posterPath != null)
-          CachedNetworkImage(
-            imageUrl: details.backdropPath ?? details.posterPath!,
-            fit: BoxFit.cover,
-            errorWidget: (_, _, _) => Container(color: Colors.black54),
-          )
-        else
-          Container(color: Colors.black87),
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.transparent, Color(0xB3000000)],
-              stops: [0.4, 1.0],
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: progressColor != null ? 10 : 0,
-          left: 16,
-          right: 16,
-          child: Opacity(
-            opacity: contentAlpha,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  details.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (details.mediaType == MediaType.tv) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        '${details.seasons.where((s) => s.seasonNumber != 0).length} saison(s)',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                      if (details.tvStatus != null) ...[
-                        const Text(
-                          ' • ',
-                          style: TextStyle(color: Colors.white70, fontSize: 18),
-                        ),
-                        Text(
-                          details.tvStatus!.label,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                      if (watchedGlobal != null &&
-                          totalGlobal != null &&
-                          totalGlobal! > 0) ...[
-                        const Text(
-                          ' • ',
-                          style: TextStyle(color: Colors.white70, fontSize: 18),
-                        ),
-                        Text(
-                          '$watchedGlobal / $totalGlobal épisodes vus',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        if (progressColor != null)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: LinearProgressIndicator(
-              value: progressValue,
-              minHeight: 6,
-              color: progressColor,
-              backgroundColor: Colors.black.withValues(alpha: 0.35),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-extension on TvStatus {
-  String get label => switch (this) {
-    TvStatus.returningSeries => 'Série en cours',
-    TvStatus.ended => 'Terminée',
-    TvStatus.canceled => 'Annulée',
-    TvStatus.planned => 'Prévue',
-    TvStatus.inProduction => 'En production',
-  };
 }
 
 class _TvTabs extends StatelessWidget {
@@ -2723,7 +2497,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
         );
         final choice = await _showRewatchEpisodeDialog(dates);
         if (choice == null) return;
-        if (choice == _RewatchChoice.rewatch) {
+        if (choice == RewatchChoice.rewatch) {
           await widget.onToggleEpisode(episode, true, null);
         } else if (dates.length > 1) {
           final selected = await _showWatchDatePickerDialog(dates);
@@ -2825,7 +2599,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
       final hasRewatches = _seasonHasRewatches();
       final choice = await _showRewatchSeasonDialog(hasRewatches);
       if (choice == null) return;
-      if (choice == _RewatchChoice.rewatch) {
+      if (choice == RewatchChoice.rewatch) {
         await widget.onRewatchSeason(widget.season);
       } else if (hasRewatches) {
         final confirmed = await _showDeleteSeasonRewatchConfirmation();
@@ -2943,8 +2717,8 @@ class _SeasonSectionState extends State<_SeasonSection> {
     );
   }
 
-  Future<_RewatchChoice?> _showRewatchEpisodeDialog(List<int> dates) {
-    return showDialog<_RewatchChoice>(
+  Future<RewatchChoice?> _showRewatchEpisodeDialog(List<int> dates) {
+    return showDialog<RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
@@ -2954,13 +2728,13 @@ class _SeasonSectionState extends State<_SeasonSection> {
         ),
         actions: [
           OutlinedButton(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.unwatch),
             child: Text(
               dates.length > 1 ? 'Supprimer un visionnage' : 'Marquer non vu',
             ),
           ),
           FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.rewatch),
             icon: const Icon(Icons.replay_rounded, size: 18),
             label: const Text('Revoir (+1 vue)'),
           ),
@@ -3032,8 +2806,8 @@ class _SeasonSectionState extends State<_SeasonSection> {
     );
   }
 
-  Future<_RewatchChoice?> _showRewatchSeasonDialog(bool hasRewatches) {
-    return showDialog<_RewatchChoice>(
+  Future<RewatchChoice?> _showRewatchSeasonDialog(bool hasRewatches) {
+    return showDialog<RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
@@ -3043,7 +2817,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
         ),
         actions: [
           OutlinedButton(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.unwatch),
             child: Text(
               hasRewatches
                   ? 'Supprimer les derniers rewatches'
@@ -3051,7 +2825,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
             ),
           ),
           FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.rewatch),
             icon: const Icon(Icons.replay_rounded, size: 18),
             label: const Text('Revoir la saison (+1 vue)'),
           ),
@@ -3515,7 +3289,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     if (isWatched) {
       final choice = await _showRewatchDialog();
       if (choice == null) return;
-      if (choice == _RewatchChoice.rewatch) {
+      if (choice == RewatchChoice.rewatch) {
         target = true;
       } else {
         final dates = _episodeWatchDates[k] ?? const <int>[];
@@ -3553,10 +3327,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
   }
 
-  Future<_RewatchChoice?> _showRewatchDialog() {
+  Future<RewatchChoice?> _showRewatchDialog() {
     final key = '${_current.seasonNumber}_${_current.episodeNumber}';
     final dates = _episodeWatchDates[key] ?? const <int>[];
-    return showDialog<_RewatchChoice>(
+    return showDialog<RewatchChoice>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
@@ -3566,13 +3340,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ),
         actions: [
           OutlinedButton(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.unwatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.unwatch),
             child: Text(
               dates.length > 1 ? 'Supprimer un visionnage' : 'Marquer non vu',
             ),
           ),
           FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(_RewatchChoice.rewatch),
+            onPressed: () => Navigator.of(context).pop(RewatchChoice.rewatch),
             icon: const Icon(Icons.replay_rounded, size: 18),
             label: const Text('Revoir (+1 vue)'),
           ),
@@ -3749,109 +3523,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   void _showWatchHistoryDialog(Episode ep) {
-    final key = '${ep.seasonNumber}_${ep.episodeNumber}';
-    final dates = _episodeWatchDates[key] ?? [];
+    final dates = _episodeWatchDates[ep.watchKey] ?? [];
     if (dates.isEmpty) return;
 
-    final sortedDates = List<int>.from(dates)..sort();
-    final firstDate = DateTime.fromMillisecondsSinceEpoch(sortedDates.first);
-    final lastDate = DateTime.fromMillisecondsSinceEpoch(sortedDates.last);
-    final rewatches = sortedDates.length > 1
-        ? sortedDates.sublist(1).reversed.toList()
-        : <int>[];
-
-    showDialog<void>(
+    showWatchHistoryDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
-        title: const Text('Historique de visionnage'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Premier visionnage : ${firstDate.day.toString().padLeft(2, '0')}/${firstDate.month.toString().padLeft(2, '0')}/${firstDate.year}',
-              ),
-              if (sortedDates.length > 1) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Dernier visionnage : ${lastDate.day.toString().padLeft(2, '0')}/${lastDate.month.toString().padLeft(2, '0')}/${lastDate.year}',
-                ),
-              ],
-              if (rewatches.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Revues (${rewatches.length}):',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                const SizedBox(height: 8),
-                ...rewatches.map((ms) {
-                  final dt = DateTime.fromMillisecondsSinceEpoch(ms);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '• ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Supprimer ce visionnage',
-                          onPressed: () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (confirmCtx) => AlertDialog(
-                                backgroundColor: Theme.of(confirmCtx)
-                                    .colorScheme
-                                    .surfaceContainerHigh,
-                                title: const Text('Confirmer la suppression'),
-                                content: Text(
-                                  'Supprimer le visionnage du ${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ?',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(confirmCtx).pop(false),
-                                    child: const Text('Annuler'),
-                                  ),
-                                  FilledButton.icon(
-                                    onPressed: () =>
-                                        Navigator.of(confirmCtx).pop(true),
-                                    icon: const Icon(
-                                      Icons.delete_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Supprimer'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true) {
-                              await _deleteEpisodeWatchDate(ep, ms);
-                              if (mounted) {
-                                Navigator.of(context).pop();
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.delete_outline_rounded),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
+      dates: dates,
+      onDeleteDate: (ms) => _deleteEpisodeWatchDate(ep, ms),
     );
   }
 
