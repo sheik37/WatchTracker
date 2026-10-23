@@ -1,7 +1,23 @@
+-- Mot de passe du role applicatif : NE JAMAIS committer de vraie valeur ici.
+-- Ce script attend une variable psql "app_password" definie AVANT execution,
+-- par exemple :
+--   psql -v app_password="'<mot_de_passe_reel>'" -f watchtracker_app.sql
+-- La vraie valeur doit provenir d'un secret/variable d'environnement injecte
+-- au moment du deploiement (ex: fichier .env/.secrets reel sur le NAS), et ne
+-- doit jamais etre ecrite en clair dans ce depot. Si "app_password" n'est pas
+-- definie, psql echouera avec une erreur explicite plutot que d'utiliser un
+-- mot de passe par defaut faible.
+\set ON_ERROR_STOP on
+\if :{?app_password}
+\else
+    \warn 'Variable psql "app_password" non definie. Relancez avec : psql -v app_password="''<mot_de_passe_reel>''" -f watchtracker_app.sql'
+    \quit
+\endif
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'watchtracker_app') THEN
-        CREATE ROLE watchtracker_app LOGIN PASSWORD 'CHANGE_ME_STRONG';
+        CREATE ROLE watchtracker_app LOGIN PASSWORD :'app_password';
     END IF;
 END $$;
 
