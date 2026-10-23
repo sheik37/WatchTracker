@@ -442,47 +442,49 @@ class MediaRepository {
     await updateWatchStatus(media, category, WatchStatus.notWatched);
   }
 
-  Future<MediaDetails> getMovieDetails(int id) async {
+  /// Factorise le schéma commun "essayer le réseau, sauver en cache, et si
+  /// ça échoue retomber sur le cache" partagé par [getMovieDetails] et
+  /// [getTvDetailsFast]. Met aussi à jour [lastFetchWasFromCache].
+  Future<MediaDetails> _fetchWithMetadataFallback({
+    required Future<MediaDetails> Function() fetchFromNetwork,
+    required String mediaType,
+    required int mediaId,
+    Future<MediaDetails> Function(MediaMetadataRow cached)? fromCachedRow,
+  }) async {
     _lastFetchWasFromCache = false;
 
     try {
-      // Try to fetch from API
-      final details = await _tmdbApi.getMovieDetails(id);
-      // Save to cache
-      await _metadataCache.saveMediaMetadata(
-        id,
-        MediaType.movie.value,
-        details,
-      );
+      final details = await fetchFromNetwork();
+      await _metadataCache.saveMediaMetadata(mediaId, mediaType, details);
       return details;
     } catch (e) {
-      // Try cache as fallback
       final cached = await _metadataCache.getMediaMetadata(
-        id,
-        MediaType.movie.value,
+        mediaId,
+        mediaType,
       );
       if (cached != null) {
         _lastFetchWasFromCache = true;
+        if (fromCachedRow != null) return fromCachedRow(cached);
         return _movieMetadataRowToDetails(cached);
       }
       rethrow;
     }
   }
 
-  Future<MediaDetails> getTvDetailsFast(int id) async {
-    _lastFetchWasFromCache = false;
+  Future<MediaDetails> getMovieDetails(int id) {
+    return _fetchWithMetadataFallback(
+      fetchFromNetwork: () => _tmdbApi.getMovieDetails(id),
+      mediaType: MediaType.movie.value,
+      mediaId: id,
+    );
+  }
 
-    try {
-      final details = await _tmdbApi.getTvDetails(id);
-      await _metadataCache.saveMediaMetadata(id, MediaType.tv.value, details);
-      return details;
-    } catch (e) {
-      final cached = await _metadataCache.getMediaMetadata(
-        id,
-        MediaType.tv.value,
-      );
-      if (cached != null) {
-        _lastFetchWasFromCache = true;
+  Future<MediaDetails> getTvDetailsFast(int id) {
+    return _fetchWithMetadataFallback(
+      fetchFromNetwork: () => _tmdbApi.getTvDetails(id),
+      mediaType: MediaType.tv.value,
+      mediaId: id,
+      fromCachedRow: (cached) async {
         final base = _movieMetadataRowToDetails(cached);
         final cachedSeasons = await _metadataCache.getSeasonMetadata(id);
         if (cachedSeasons.isEmpty) {
@@ -501,9 +503,8 @@ class MediaRepository {
           genres: base.genres,
           seasons: _seasonRowsToSeasons(cachedSeasons),
         );
-      }
-      rethrow;
-    }
+      },
+    );
   }
 
   Future<int?> _getTvdbId(int tmdbId) async {
