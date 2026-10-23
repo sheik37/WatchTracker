@@ -530,6 +530,8 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                     repository: _repository,
                     profile: _profile,
                     onLogout: _logout,
+                    appUpdateService: _appUpdateService,
+                    appUpdateLauncher: _appUpdateLauncher,
                     onProfileUpdated: (profile) {
                       _handleProfileUpdated(profile);
                     },

@@ -19,6 +19,8 @@ class ProfileScreen extends StatefulWidget {
     required this.onLogout,
     required this.onSubScreenVisibilityChanged,
     required this.onProfileUpdated,
+    this.appUpdateService,
+    this.appUpdateLauncher,
   });
 
   final MediaRepository repository;
@@ -26,6 +28,13 @@ class ProfileScreen extends StatefulWidget {
   final Future<void> Function() onLogout;
   final ValueChanged<bool> onSubScreenVisibilityChanged;
   final ValueChanged<UserProfile> onProfileUpdated;
+
+  /// Optional shared update-check service/launcher, typically owned by the
+  /// app root (see `WatchTrackerApp`) so the same HTTP client/instance is
+  /// reused instead of each screen creating (and disposing) its own. When
+  /// omitted, this screen creates and owns its own instances.
+  final AppUpdateService? appUpdateService;
+  final AppUpdateLauncher? appUpdateLauncher;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -56,8 +65,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _deletingAccount = false;
   String? _deleteError;
 
-  final AppUpdateService _appUpdateService = AppUpdateService();
-  final AppUpdateLauncher _appUpdateLauncher = AppUpdateLauncher();
+  late final AppUpdateService _appUpdateService =
+      widget.appUpdateService ?? AppUpdateService();
+  late final AppUpdateLauncher _appUpdateLauncher =
+      widget.appUpdateLauncher ?? AppUpdateLauncher();
   bool _checkingForUpdates = false;
   String? _appUpdateError;
   AppUpdateResult? _appUpdateResult;
@@ -165,7 +176,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
-    _appUpdateService.dispose();
+    // Only dispose the update-check service when this screen created it
+    // itself; a service shared from the app root (see `WatchTrackerApp`)
+    // outlives this screen and must be disposed by its owner instead.
+    if (widget.appUpdateService == null) {
+      _appUpdateService.dispose();
+    }
     _displayNameCtrl.dispose();
     _curPassCtrl.dispose();
     _newPassCtrl.dispose();
