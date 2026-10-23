@@ -5,6 +5,9 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/date_formatter.dart';
+import '../../core/episode_watch_key.dart';
+import '../../core/network_error_classifier.dart';
 import '../../data/models/backend_models.dart';
 import '../../data/models/details_models.dart';
 import '../../data/models/media_models.dart';
@@ -232,18 +235,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-  }
-
-  bool _isOfflineOrServerUnreachableError(String message) {
-    final normalized = message.toLowerCase();
-    return normalized.contains('socketexception') ||
-        normalized.contains('connection') ||
-        normalized.contains('connexion') ||
-        normalized.contains('clientexception') ||
-        normalized.contains('timed out') ||
-        normalized.contains('délai dépassé') ||
-        normalized.contains('impossible de contacter') ||
-        normalized.contains('serveur est accessible');
   }
 
   Future<void> _toggleWatchlist() async {
@@ -840,7 +831,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _toggleEpisodeWithCheck(Episode episode, bool target) async {
     final details = _details;
     if (details == null) return;
-    final key = _episodeWatchKey(episode);
+    final key = episode.watchKey;
     final alreadyWatched = _watchedEpisodes.contains(key);
     if (episode.seasonNumber == 0) {
       if (!target && alreadyWatched) {
@@ -929,11 +920,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
     await _setEpisodeWatched(episode, true, null, false);
   }
 
-  String _formatWatchDateLabel(int millis) {
-    final date = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-  }
-
   Future<int?> _showWatchDatePickerDialog(List<int> dates) {
     if (dates.isEmpty) return Future<int?>.value(null);
     return showDialog<int>(
@@ -950,7 +936,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 for (final watchedAt in dates)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: Text(_formatWatchDateLabel(watchedAt)),
+                    title: Text(formatWatchDateLabel(watchedAt)),
                     trailing: const Icon(Icons.delete_outline_rounded),
                     onTap: () async {
                       final confirmed = await showDialog<bool>(
@@ -961,7 +947,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               .surfaceContainerHigh,
                           title: const Text('Confirmer la suppression'),
                           content: Text(
-                            'Supprimer le visionnage du ${_formatWatchDateLabel(watchedAt)} ?',
+                            'Supprimer le visionnage du ${formatWatchDateLabel(watchedAt)} ?',
                           ),
                           actions: [
                             TextButton(
@@ -1060,7 +1046,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   ) async {
     final details = _details;
     if (details == null) return;
-    final key = _episodeWatchKey(episode);
+    final key = episode.watchKey;
     final previousWatched = <String>{..._watchedEpisodes};
     final previousAt = Map<String, int>.from(_episodeWatchedAt);
     final previousCounts = Map<String, int>.from(_episodeViewCounts);
@@ -1277,7 +1263,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                     .surfaceContainerHigh,
                                 title: const Text('Confirmer la suppression'),
                                 content: Text(
-                                  'Supprimer le visionnage du ${_formatWatchDateLabel(ms)} ?',
+                                  'Supprimer le visionnage du ${formatWatchDateLabel(ms)} ?',
                                 ),
                                 actions: [
                                   TextButton(
@@ -1430,9 +1416,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
     _tvSwipeDelta = 0;
   }
 
-  String _episodeWatchKey(Episode episode) =>
-      '${episode.seasonNumber}_${episode.episodeNumber}';
-
   Future<Episode?> _findNextEpisodeToWatch(
     MediaDetails details,
     List<Season> orderedSeasons,
@@ -1453,7 +1436,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ..sort((a, b) => a.episodeNumber.compareTo(b.episodeNumber));
       for (final episode in orderedEpisodes) {
         if (!_isReleasedEpisode(episode)) continue;
-        if (_watchedEpisodes.contains(_episodeWatchKey(episode))) continue;
+        if (_watchedEpisodes.contains(episode.watchKey)) continue;
         return episode;
       }
     }
@@ -1709,7 +1692,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_error != null) {
-      final isOffline = _isOfflineOrServerUnreachableError(_error!);
+      final isOffline = isOfflineOrServerUnreachableError(_error!);
       return Scaffold(
         appBar: AppBar(),
         body: Center(
@@ -2616,20 +2599,17 @@ class _SeasonSectionState extends State<_SeasonSection> {
     }
   }
 
-  String _episodeWatchKey(Episode ep) =>
-      '${ep.seasonNumber}_${ep.episodeNumber}';
-
   GlobalKey _episodeTileKey(Episode ep) => _episodeTileKeys.putIfAbsent(
-    _episodeWatchKey(ep),
+    ep.watchKey,
     () =>
         GlobalKey(debugLabel: 'episode-${ep.seasonNumber}-${ep.episodeNumber}'),
   );
 
   bool _isWatched(Episode ep) =>
-      widget.watchedEpisodes.contains(_episodeWatchKey(ep));
+      widget.watchedEpisodes.contains(ep.watchKey);
 
   int _episodeViewCount(Episode ep) =>
-      widget.episodeViewCounts[_episodeWatchKey(ep)] ??
+      widget.episodeViewCounts[ep.watchKey] ??
       (_isWatched(ep) ? 1 : 0);
 
   int? _episodeReviewCount(Episode ep) {
@@ -2698,7 +2678,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
       if (!mounted) return;
       setState(() => _episodesLoadFailed = true);
       final message = e.toString();
-      final friendly = _isOfflineOrServerUnreachableError(message)
+      final friendly = isOfflineOrServerUnreachableError(message)
           ? 'Hors-ligne: aucun épisode en cache pour cette saison.'
           : 'Impossible de charger les épisodes.';
       ScaffoldMessenger.of(context)
@@ -2708,18 +2688,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
         setState(() => _loadingEpisodes = false);
       }
     }
-  }
-
-  bool _isOfflineOrServerUnreachableError(String message) {
-    final normalized = message.toLowerCase();
-    return normalized.contains('socketexception') ||
-        normalized.contains('connection') ||
-        normalized.contains('connexion') ||
-        normalized.contains('clientexception') ||
-        normalized.contains('timed out') ||
-        normalized.contains('délai dépassé') ||
-        normalized.contains('impossible de contacter') ||
-        normalized.contains('serveur est accessible');
   }
 
   void _showEpisodesOfflineSnackbar() {
@@ -3001,11 +2969,6 @@ class _SeasonSectionState extends State<_SeasonSection> {
     );
   }
 
-  String _formatWatchDateLabel(int millis) {
-    final date = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-  }
-
   Future<int?> _showWatchDatePickerDialog(List<int> dates) {
     if (dates.isEmpty) return Future<int?>.value(null);
     return showDialog<int>(
@@ -3022,7 +2985,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                 for (final watchedAt in dates)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: Text(_formatWatchDateLabel(watchedAt)),
+                    title: Text(formatWatchDateLabel(watchedAt)),
                     trailing: const Icon(Icons.delete_outline_rounded),
                     onTap: () async {
                       final confirmed = await showDialog<bool>(
@@ -3033,7 +2996,7 @@ class _SeasonSectionState extends State<_SeasonSection> {
                               .surfaceContainerHigh,
                           title: const Text('Confirmer la suppression'),
                           content: Text(
-                            'Supprimer le visionnage du ${_formatWatchDateLabel(watchedAt)} ?',
+                            'Supprimer le visionnage du ${formatWatchDateLabel(watchedAt)} ?',
                           ),
                           actions: [
                             TextButton(
