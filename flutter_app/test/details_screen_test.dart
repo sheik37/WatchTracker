@@ -6,6 +6,7 @@ import 'package:flutter_app/src/data/models/media_models.dart';
 import 'package:flutter_app/src/data/remote/tmdb_api_client.dart';
 import 'package:flutter_app/src/data/remote/tvdb_api_client.dart';
 import 'package:flutter_app/src/data/repositories/media_repository.dart';
+import 'package:flutter_app/src/presentation/screens/details/episode_detail_page.dart';
 import 'package:flutter_app/src/presentation/screens/details_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 
