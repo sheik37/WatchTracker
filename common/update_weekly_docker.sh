@@ -23,8 +23,10 @@ log_info "Start weekly docker update"
 SNAP_DIR="/volume1/homes/sheik37.v/docker/logs/image-snapshots"
 mkdir -p "$SNAP_DIR"
 SNAP_FILE="$SNAP_DIR/images_before_update_$(date +%Y%m%d_%H%M%S).txt"
-docker image prune -f
+# Le snapshot doit capturer l'etat AVANT toute suppression, donc le
+# prune doit s'executer apres avoir liste les images existantes.
 docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}" > "$SNAP_FILE"
+docker image prune -f
 
 # 1) backup before update
 cd "$DB_DIR"
