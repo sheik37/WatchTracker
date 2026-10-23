@@ -22,9 +22,20 @@ services:
     image: dpage/pgadmin4:9.16
     container_name: watchtracker_pgadmin
     restart: unless-stopped
-    user: "0:0"
+    # Pas de "user: 0:0" : pgAdmin n'a pas besoin de tourner en root.
+    # Si le volume pgadmin_data existant a ete cree pendant que ce service
+    # tournait en root (0:0), les permissions internes du volume peuvent
+    # empecher pgAdmin de demarrer avec l'utilisateur par defaut de l'image.
+    # Dans ce cas, soit supprimer/recreer le volume (perte des donnees
+    # pgAdmin : connexions enregistrees, pas les donnees Postgres), soit
+    # corriger les permissions du volume (ex: via un conteneur temporaire
+    # `docker run --rm -v pgadmin_data:/var/lib/pgadmin busybox chown -R 5050:5050 /var/lib/pgadmin`),
+    # soit remettre temporairement "user: 0:0" le temps de corriger les
+    # permissions puis le retirer a nouveau.
     env_file:
       - .env
+      # Chemin NAS en dur conserve en repli pour la retrocompatibilite des
+      # deploiements existants ; surchargeable via COMMON_SECRETS_FILE.
       - ${COMMON_SECRETS_FILE:-/volume1/homes/sheik37.v/docker/common/.secrets}
     environment:
       PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED: "False"
