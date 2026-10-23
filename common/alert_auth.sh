@@ -3,11 +3,13 @@ set -eu
 . /volume1/homes/sheik37.v/docker/common/.secrets
 . /volume1/homes/sheik37.v/docker/common/common.sh
 
+API_CONTAINER_NAME="${API_CONTAINER_NAME:-watchtracker_api-api-1}"
+
 LOG_DIR="${WATCHTRACKER_LOG_DIR:-/volume1/homes/sheik37.v/docker/logs}"
 AUTH_IP_LOG="$LOG_DIR/task-alert-auth-ip.log"
 mkdir -p "$LOG_DIR"
 
-AUTH_WINDOW_LOGS="$(docker logs watchtracker_api-api-1 --since 15m 2>&1 || true)"
+AUTH_WINDOW_LOGS="$(docker logs "$API_CONTAINER_NAME" --since 15m 2>&1 || true)"
 
 printf "%s\n" "$AUTH_WINDOW_LOGS" | grep "event=auth_login_failed" | sed -n "s/.*ip=\([^ ]*\).*/\1/p" | while IFS= read -r ip; do
   [ -n "$ip" ] || continue

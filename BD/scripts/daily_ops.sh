@@ -7,18 +7,6 @@ ENV_FILE="$BASE_DIR/.env"
 COMMON_SH_FILE="$COMMON_DIR/common.sh"
 COMMON_SECRETS_FILE="${COMMON_SECRETS_FILE:-$COMMON_DIR/.secrets}"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE"
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-if [ -f "$COMMON_SECRETS_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$COMMON_SECRETS_FILE"
-fi
-
 if [ -f "$COMMON_SH_FILE" ]; then
   # shellcheck disable=SC1090
   . "$COMMON_SH_FILE"
@@ -27,7 +15,31 @@ else
   log_error() { echo "[ERROR] $1" >&2; }
   notify_discord() { :; }
   log_alert() { :; }
+  wt_load_env() {
+    [ -f "$1" ] || { echo "Missing $1" >&2; exit 1; }
+    # shellcheck disable=SC1090
+    . "$1"
+    if [ -n "${2:-}" ] && [ -f "$2" ]; then
+      # shellcheck disable=SC1090
+      . "$2"
+    fi
+  }
+  container_is_running() {
+    if docker inspect -f "{{.State.Running}}" "$1" 2>/dev/null | grep -q true; then
+      return 0
+    fi
+    if [ "${2:-0}" -le 0 ] 2>/dev/null; then
+      return 1
+    fi
+    sleep "$2"
+    if docker inspect -f "{{.State.Running}}" "$1" 2>/dev/null | grep -q true; then
+      return 2
+    fi
+    return 1
+  }
 fi
+
+wt_load_env "$ENV_FILE" "$COMMON_SECRETS_FILE"
 
 ROOT_DIR="$(dirname "$BASE_DIR")"
 SCRIPTS_DIR="$BASE_DIR/scripts"
@@ -181,17 +193,17 @@ run_auth_alert_health_check() {
 
 run_container_alert_health_check() {
    for c in $API_CONTAINER_NAME $POSTGRES_CONTAINER_NAME; do
-     if ! docker inspect -f "{{.State.Running}}" "$c" 2>/dev/null | grep -q true; then
-       sleep 20
-       if ! docker inspect -f "{{.State.Running}}" "$c" 2>/dev/null | grep -q true; then
-         append_report "❌ Container $c is not running"
-         mark_error
-       else
+     if container_is_running "$c" 20; then
+       append_report "✅ Container $c is running"
+     else
+       CONTAINER_STATUS=$?
+       if [ "$CONTAINER_STATUS" -eq 2 ]; then
          append_report "⚠️ Container $c is restarting"
          mark_warn
+       else
+         append_report "❌ Container $c is not running"
+         mark_error
        fi
-     else
-       append_report "✅ Container $c is running"
      fi
    done
 }
