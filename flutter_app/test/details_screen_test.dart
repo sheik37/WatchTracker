@@ -1234,7 +1234,11 @@ class _FakeMediaRepository extends MediaRepository {
   }
 
   @override
-  Future<void> prefetchSeasonEpisodes(MediaDetails details) async {}
+  Future<void> prefetchSeasonEpisodes(
+    MediaDetails details, {
+    bool prefetchAllSeasons = false,
+    int? currentSeasonNumber,
+  }) async {}
 
   @override
   Future<bool> isInWatchlist(

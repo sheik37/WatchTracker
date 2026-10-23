@@ -150,73 +150,155 @@ void main() {
   });
 
   group('prefetchSeasonEpisodes', () {
-    test('fetches episodes for every season of the show', () async {
-      final requestedPaths = <String>[];
-      final client = MockClient((request) async {
-        requestedPaths.add(request.url.path);
-        final match = RegExp(r'/season/(\d+)$').firstMatch(request.url.path);
-        final seasonNumber = int.parse(match!.group(1)!);
-        return http.Response(
-          jsonEncode(<String, dynamic>{
-            'episodes': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'id': seasonNumber * 1000 + 1,
-                'name': 'Episode 1',
-                'overview': '',
-                'episode_number': 1,
-                'season_number': seasonNumber,
-                'still_path': null,
-              },
-            ],
-          }),
-          200,
+    test(
+      'by default only prefetches the current and next season',
+      () async {
+        final requestedPaths = <String>[];
+        final client = MockClient((request) async {
+          requestedPaths.add(request.url.path);
+          final match = RegExp(
+            r'/season/(\d+)$',
+          ).firstMatch(request.url.path);
+          final seasonNumber = int.parse(match!.group(1)!);
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'episodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': seasonNumber * 1000 + 1,
+                  'name': 'Episode 1',
+                  'overview': '',
+                  'episode_number': 1,
+                  'season_number': seasonNumber,
+                  'still_path': null,
+                },
+              ],
+            }),
+            200,
+          );
+        });
+        final tmdbApi = TmdbApiClient(apiKey: 'key', client: client);
+        final database = WatchTrackerDatabase();
+        final repository = MediaRepository(tmdbApi, null, database);
+
+        const details = MediaDetails(
+          id: 20,
+          title: 'Show',
+          overview: '',
+          posterPath: null,
+          backdropPath: null,
+          releaseDate: null,
+          voteAverage: 0,
+          mediaType: MediaType.tv,
+          seasons: [
+            Season(id: 1, name: 'Spéciaux', seasonNumber: 0, episodeCount: 2),
+            Season(id: 2, name: 'Saison 1', seasonNumber: 1, episodeCount: 10),
+            Season(id: 3, name: 'Saison 2', seasonNumber: 2, episodeCount: 10),
+            Season(id: 4, name: 'Saison 3', seasonNumber: 3, episodeCount: 10),
+          ],
         );
-      });
-      final tmdbApi = TmdbApiClient(apiKey: 'key', client: client);
-      final database = WatchTrackerDatabase();
-      final repository = MediaRepository(tmdbApi, null, database);
 
-      const details = MediaDetails(
-        id: 20,
-        title: 'Show',
-        overview: '',
-        posterPath: null,
-        backdropPath: null,
-        releaseDate: null,
-        voteAverage: 0,
-        mediaType: MediaType.tv,
-        seasons: [
-          Season(id: 1, name: 'Spéciaux', seasonNumber: 0, episodeCount: 2),
-          Season(id: 2, name: 'Saison 1', seasonNumber: 1, episodeCount: 10),
-          Season(id: 3, name: 'Saison 2', seasonNumber: 2, episodeCount: 10),
-          Season(id: 4, name: 'Saison 3', seasonNumber: 3, episodeCount: 10),
-        ],
-      );
+        await repository.prefetchSeasonEpisodes(details);
 
-      await repository.prefetchSeasonEpisodes(details);
+        // Only the current (first) season and the next one are prefetched
+        // by default.
+        expect(
+          requestedPaths,
+          containsAll(<String>['/3/tv/20/season/1', '/3/tv/20/season/2']),
+        );
+        expect(
+          requestedPaths.any((path) => path.contains('/season/3')),
+          isFalse,
+        );
+        expect(
+          requestedPaths.any((path) => path.contains('/season/0')),
+          isFalse,
+        );
 
-      // Season 0 (specials) is never prefetched.
-      expect(
-        requestedPaths,
-        containsAll(<String>[
-          '/3/tv/20/season/1',
-          '/3/tv/20/season/2',
-          '/3/tv/20/season/3',
-        ]),
-      );
-      expect(
-        requestedPaths.any((path) => path.contains('/season/0')),
-        isFalse,
-      );
+        // Both prefetched seasons end up cached in memory, so a later call
+        // does not hit the network again.
+        requestedPaths.clear();
+        await repository.getSeasonEpisodes(20, 1);
+        await repository.getSeasonEpisodes(20, 2);
+        expect(requestedPaths, isEmpty);
+      },
+    );
 
-      // All seasons end up cached in memory, so a later call does not hit
-      // the network again.
-      requestedPaths.clear();
-      await repository.getSeasonEpisodes(20, 1);
-      await repository.getSeasonEpisodes(20, 2);
-      await repository.getSeasonEpisodes(20, 3);
-      expect(requestedPaths, isEmpty);
-    });
+    test(
+      'prefetchAllSeasons: true restores the previous behaviour and '
+      'fetches every season',
+      () async {
+        final requestedPaths = <String>[];
+        final client = MockClient((request) async {
+          requestedPaths.add(request.url.path);
+          final match = RegExp(
+            r'/season/(\d+)$',
+          ).firstMatch(request.url.path);
+          final seasonNumber = int.parse(match!.group(1)!);
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'episodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': seasonNumber * 1000 + 1,
+                  'name': 'Episode 1',
+                  'overview': '',
+                  'episode_number': 1,
+                  'season_number': seasonNumber,
+                  'still_path': null,
+                },
+              ],
+            }),
+            200,
+          );
+        });
+        final tmdbApi = TmdbApiClient(apiKey: 'key', client: client);
+        final database = WatchTrackerDatabase();
+        final repository = MediaRepository(tmdbApi, null, database);
+
+        const details = MediaDetails(
+          id: 20,
+          title: 'Show',
+          overview: '',
+          posterPath: null,
+          backdropPath: null,
+          releaseDate: null,
+          voteAverage: 0,
+          mediaType: MediaType.tv,
+          seasons: [
+            Season(id: 1, name: 'Spéciaux', seasonNumber: 0, episodeCount: 2),
+            Season(id: 2, name: 'Saison 1', seasonNumber: 1, episodeCount: 10),
+            Season(id: 3, name: 'Saison 2', seasonNumber: 2, episodeCount: 10),
+            Season(id: 4, name: 'Saison 3', seasonNumber: 3, episodeCount: 10),
+          ],
+        );
+
+        await repository.prefetchSeasonEpisodes(
+          details,
+          prefetchAllSeasons: true,
+        );
+
+        // Season 0 (specials) is never prefetched.
+        expect(
+          requestedPaths,
+          containsAll(<String>[
+            '/3/tv/20/season/1',
+            '/3/tv/20/season/2',
+            '/3/tv/20/season/3',
+          ]),
+        );
+        expect(
+          requestedPaths.any((path) => path.contains('/season/0')),
+          isFalse,
+        );
+
+        // All seasons end up cached in memory, so a later call does not hit
+        // the network again.
+        requestedPaths.clear();
+        await repository.getSeasonEpisodes(20, 1);
+        await repository.getSeasonEpisodes(20, 2);
+        await repository.getSeasonEpisodes(20, 3);
+        expect(requestedPaths, isEmpty);
+      },
+    );
   });
 
   group('season episodes in-memory cache (bounded LRU)', () {

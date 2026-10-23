@@ -666,7 +666,18 @@ class MediaRepository {
     }
   }
 
-  Future<void> prefetchSeasonEpisodes(MediaDetails details) async {
+  /// Précharge les épisodes des saisons d'une série.
+  ///
+  /// Par défaut, ne précharge que la saison [currentSeasonNumber] (ou la
+  /// première saison si non précisée) et la suivante, pour éviter de
+  /// lancer un grand nombre d'appels réseau simultanés sur des séries ayant
+  /// beaucoup de saisons. Passez [prefetchAllSeasons] à `true` pour
+  /// retrouver l'ancien comportement qui précharge toutes les saisons.
+  Future<void> prefetchSeasonEpisodes(
+    MediaDetails details, {
+    bool prefetchAllSeasons = false,
+    int? currentSeasonNumber,
+  }) async {
     if (details.mediaType != MediaType.tv) return;
     final seasons =
         details.seasons
@@ -675,8 +686,11 @@ class MediaRepository {
             .toList()
           ..sort();
     if (seasons.isEmpty) return;
+    final seasonsToPrefetch = prefetchAllSeasons
+        ? seasons
+        : _currentAndNextSeason(seasons, currentSeasonNumber);
     await Future.wait(
-      seasons.map((seasonNumber) async {
+      seasonsToPrefetch.map((seasonNumber) async {
         final cacheKey = '${details.id}_$seasonNumber';
         if (_seasonEpisodesCache.containsKey(cacheKey)) return;
         try {
@@ -684,6 +698,20 @@ class MediaRepository {
         } catch (_) {}
       }),
     );
+  }
+
+  /// Retourne la saison [currentSeasonNumber] (ou la première saison
+  /// disponible si non précisée) et la saison suivante, parmi
+  /// [sortedSeasonNumbers] (triés par ordre croissant).
+  List<int> _currentAndNextSeason(
+    List<int> sortedSeasonNumbers,
+    int? currentSeasonNumber,
+  ) {
+    final current = currentSeasonNumber ?? sortedSeasonNumbers.first;
+    var index = sortedSeasonNumbers.indexOf(current);
+    if (index == -1) index = 0;
+    final end = (index + 2).clamp(0, sortedSeasonNumbers.length);
+    return sortedSeasonNumbers.sublist(index, end);
   }
 
   Future<List<RemoteEpisodeProgress>> getEpisodeProgress(int mediaId) async {
