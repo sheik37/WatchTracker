@@ -250,7 +250,7 @@ send_summary() {
     TITLE="WatchTracker • Ops Daily • ERROR"
     LEVEL="ERROR"
   elif [ "$HAS_WARN" -eq 1 ]; then
-    TITLE="WatchTracker • Ops Daily • WARN"cd
+    TITLE="WatchTracker • Ops Daily • WARN"
     LEVEL="WARN"
   fi
 
