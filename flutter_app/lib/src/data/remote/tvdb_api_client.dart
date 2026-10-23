@@ -13,9 +13,28 @@ class TvdbApiClient {
   static const _baseUrl = 'https://api4.thetvdb.com/v4';
 
   String? _token;
+  Future<void>? _loginInFlight;
 
   Future<void> _ensureAuth({bool isRetry = false}) async {
     if (_token != null) return;
+    // Mémorise le login en cours pour que les appels concurrents (ex:
+    // préchargement de plusieurs saisons en parallèle) attendent le même
+    // login au lieu d'en déclencher un nouveau chacun.
+    final pending = _loginInFlight;
+    if (pending != null) {
+      await pending;
+      return;
+    }
+    final login = _login();
+    _loginInFlight = login;
+    try {
+      await login;
+    } finally {
+      _loginInFlight = null;
+    }
+  }
+
+  Future<void> _login() async {
     if (apiKey.isEmpty) throw StateError('TVDB_API_KEY manquant');
     final body = await _http.postJson(
       '/login',
