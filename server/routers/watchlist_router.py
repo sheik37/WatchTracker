@@ -123,6 +123,10 @@ def post_episode_rewatch(
     episode_number: int,
     user_id: int = Depends(get_current_user_id),
 ) -> None:
+    # season_number/episode_number sont des paramètres de chemin bruts (pas
+    # de schéma Pydantic associé) : le contrôle manuel est conservé pour
+    # préserver le code 400 + le message existants (un Path(ge=...) donnerait
+    # un 422 FastAPI, ce qui changerait le comportement observable).
     if season_number < 0 or episode_number < 1:
         raise HTTPException(status_code=400, detail="Invalid season/episode number")
     episode_crud.rewatch_episode_progress(
@@ -136,8 +140,10 @@ def post_episode_rewatch_season(
     payload: SeasonRewatchIn,
     user_id: int = Depends(get_current_user_id),
 ) -> None:
-    if payload.season_number < 0:
-        raise HTTPException(status_code=400, detail="Invalid season number")
+    # payload.season_number est déjà validé (>= 0) par Field(...) dans
+    # schemas.SeasonRewatchIn ; seule la validation des numéros d'épisode
+    # individuels (>= 1) reste ici, car la déplacer dans le schéma changerait
+    # le code de statut (422 au lieu de 400) et le message d'erreur renvoyés.
     if any(number < 1 for number in payload.episode_numbers):
         raise HTTPException(status_code=400, detail="Invalid episode number")
     episode_crud.rewatch_episode_season(

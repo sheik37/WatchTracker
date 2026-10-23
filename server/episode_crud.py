@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from db import cursor
+from query_helpers import since_clause
 from schemas import EpisodeProgressItemIn
 
 
@@ -19,26 +20,19 @@ def list_episode_progress_since(
 ) -> list[dict[str, Any]]:
     with cursor() as cur:
         params: list[Any] = [user_id, media_id]
-        since_clause = ""
-        if since is not None:
-            params.append(since)
-            since_clause = " AND updated_at > %s"
+        clause = since_clause("updated_at", since, params)
         cur.execute(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
             FROM episode_progress
             WHERE user_id = %s AND media_id = %s"""
-            + since_clause
+            + clause
             + """
             ORDER BY season_number, episode_number
             """,
             tuple(params),
         )
         return list(cur.fetchall())
-
-
-def list_all_episode_progress(user_id: int) -> list[dict[str, Any]]:
-    return list_all_episode_progress_since(user_id, None)
 
 
 def list_all_episode_progress_since(
@@ -48,16 +42,13 @@ def list_all_episode_progress_since(
 ) -> list[dict[str, Any]]:
     with nullcontext(cur) if cur is not None else cursor() as c:
         params: list[Any] = [user_id]
-        since_clause = ""
-        if since is not None:
-            params.append(since)
-            since_clause = " AND updated_at > %s"
+        clause = since_clause("updated_at", since, params)
         c.execute(
             """
             SELECT media_id, season_number, episode_number, is_watched, updated_at, sync_updated_at
             FROM episode_progress
             WHERE user_id = %s"""
-            + since_clause
+            + clause
             + """
             ORDER BY media_id, season_number, episode_number
             """,
@@ -73,26 +64,19 @@ def list_episode_progress_tombstones_since(
 ) -> list[dict[str, Any]]:
     with nullcontext(cur) if cur is not None else cursor() as c:
         params: list[Any] = [user_id]
-        since_clause = ""
-        if since is not None:
-            params.append(since)
-            since_clause = " AND deleted_at > %s"
+        clause = since_clause("deleted_at", since, params)
         c.execute(
             """
             SELECT media_id, season_number, episode_number, deleted_at
             FROM episode_progress_tombstones
             WHERE user_id = %s"""
-            + since_clause
+            + clause
             + """
             ORDER BY deleted_at DESC
             """,
             tuple(params),
         )
         return list(c.fetchall())
-
-
-def list_episode_progress_tombstones(user_id: int) -> list[dict[str, Any]]:
-    return list_episode_progress_tombstones_since(user_id, None)
 
 
 def replace_episode_progress(

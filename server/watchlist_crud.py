@@ -5,13 +5,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from db import cursor
+from query_helpers import since_clause
 from schemas import WatchlistItemIn
-
-
-def list_watchlist(
-    user_id: int, content_category: Optional[str] = None
-) -> list[dict[str, Any]]:
-    return list_watchlist_since(user_id, content_category, None)
 
 
 def list_watchlist_since(
@@ -23,10 +18,7 @@ def list_watchlist_since(
     # ``cur`` permet de réutiliser une connexion/transaction déjà ouverte
     # (voir sync_crud.get_sync_snapshot_data) au lieu d'en ouvrir une nouvelle.
     params: list[Any] = [user_id]
-    since_clause = ""
-    if since is not None:
-        params.append(since)
-        since_clause = " AND updated_at > %s"
+    clause = since_clause("updated_at", since, params)
     with nullcontext(cur) if cur is not None else cursor() as c:
         if content_category:
             params.append(content_category)
@@ -35,7 +27,7 @@ def list_watchlist_since(
                 SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
                 FROM watchlist
                 WHERE user_id = %s"""
-                + since_clause
+                + clause
                 + """
                   AND content_category = %s
                 ORDER BY added_at DESC
@@ -49,7 +41,7 @@ def list_watchlist_since(
             SELECT id, title, poster_path, media_type, content_category, content_status, total_episodes, added_at, updated_at
             FROM watchlist
             WHERE user_id = %s"""
-            + since_clause
+            + clause
             + """
             ORDER BY added_at DESC
             """,
@@ -230,10 +222,6 @@ def update_watch_total(
         return dict(row) if row else None
 
 
-def list_watchlist_tombstones(user_id: int) -> list[dict[str, Any]]:
-    return list_watchlist_tombstones_since(user_id, None)
-
-
 def list_watchlist_tombstones_since(
     user_id: int,
     since: Optional[datetime] = None,
@@ -241,16 +229,13 @@ def list_watchlist_tombstones_since(
 ) -> list[dict[str, Any]]:
     with nullcontext(cur) if cur is not None else cursor() as c:
         params: list[Any] = [user_id]
-        since_clause = ""
-        if since is not None:
-            params.append(since)
-            since_clause = " AND deleted_at > %s"
+        clause = since_clause("deleted_at", since, params)
         c.execute(
             """
             SELECT id, media_type, content_category, deleted_at
             FROM watchlist_tombstones
             WHERE user_id = %s"""
-            + since_clause
+            + clause
             + """
             ORDER BY deleted_at DESC
             """,
