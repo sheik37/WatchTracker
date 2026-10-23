@@ -31,8 +31,33 @@ class MediaRepository {
   late final MetadataCache _metadataCache;
   late final OfflineSyncQueue _syncQueue;
   final Map<int, int?> _tvdbIdCache = {};
-  final Map<String, List<Episode>> _seasonEpisodesCache = {};
+
+  /// Cache mémoire LRU (borné à [_maxSeasonEpisodesCacheEntries] entrées)
+  /// des épisodes déjà récupérés par saison, pour éviter que l'app ne
+  /// garde indéfiniment en mémoire toutes les saisons consultées pendant
+  /// sa durée de vie.
+  static const int _maxSeasonEpisodesCacheEntries = 20;
+  final Map<String, List<Episode>> _seasonEpisodesCache =
+      <String, List<Episode>>{};
   final Map<String, Future<List<Episode>>> _seasonEpisodesInFlight = {};
+
+  /// Récupère une entrée du cache LRU et la marque comme récemment utilisée.
+  List<Episode>? _getSeasonEpisodesFromCache(String key) {
+    final cached = _seasonEpisodesCache.remove(key);
+    if (cached == null) return null;
+    _seasonEpisodesCache[key] = cached;
+    return cached;
+  }
+
+  /// Insère/actualise une entrée du cache LRU et évince la plus ancienne
+  /// entrée si la taille max est dépassée.
+  void _putSeasonEpisodesInCache(String key, List<Episode> episodes) {
+    _seasonEpisodesCache.remove(key);
+    _seasonEpisodesCache[key] = episodes;
+    while (_seasonEpisodesCache.length > _maxSeasonEpisodesCacheEntries) {
+      _seasonEpisodesCache.remove(_seasonEpisodesCache.keys.first);
+    }
+  }
   final ValueNotifier<int> watchlistVersion = ValueNotifier<int>(0);
 
   // Tracks if last fetch was from cache
@@ -575,7 +600,7 @@ class MediaRepository {
 
   Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async {
     final cacheKey = '${tvId}_$seasonNumber';
-    final cached = _seasonEpisodesCache[cacheKey];
+    final cached = _getSeasonEpisodesFromCache(cacheKey);
     if (cached != null) return cached;
     final inFlight = _seasonEpisodesInFlight[cacheKey];
     if (inFlight != null) return inFlight;
@@ -588,7 +613,7 @@ class MediaRepository {
         if (tvdbId != null) {
           try {
             episodes = await tvdb.getSeasonEpisodes(tvdbId, seasonNumber);
-            _seasonEpisodesCache[cacheKey] = episodes;
+            _putSeasonEpisodesInCache(cacheKey, episodes);
             // Save to persistent cache
             await _metadataCache.saveEpisodeMetadata(
               tvId,
@@ -601,7 +626,7 @@ class MediaRepository {
       }
       try {
         episodes = await _tmdbApi.getSeasonDetails(tvId, seasonNumber);
-        _seasonEpisodesCache[cacheKey] = episodes;
+        _putSeasonEpisodesInCache(cacheKey, episodes);
         // Save to persistent cache
         await _metadataCache.saveEpisodeMetadata(tvId, seasonNumber, episodes);
         return episodes;
@@ -627,7 +652,7 @@ class MediaRepository {
                 ),
               )
               .toList();
-          _seasonEpisodesCache[cacheKey] = episodes;
+          _putSeasonEpisodesInCache(cacheKey, episodes);
           return episodes;
         }
         rethrow;

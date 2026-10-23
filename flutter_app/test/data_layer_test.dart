@@ -219,6 +219,59 @@ void main() {
     });
   });
 
+  group('season episodes in-memory cache (bounded LRU)', () {
+    test(
+      'evicts the least recently used season once the cache is full',
+      () async {
+        final requestedPaths = <String>[];
+        final client = MockClient((request) async {
+          requestedPaths.add(request.url.path);
+          final match = RegExp(
+            r'/season/(\d+)$',
+          ).firstMatch(request.url.path);
+          final seasonNumber = int.parse(match!.group(1)!);
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'episodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': seasonNumber * 1000 + 1,
+                  'name': 'Episode 1',
+                  'overview': '',
+                  'episode_number': 1,
+                  'season_number': seasonNumber,
+                  'still_path': null,
+                },
+              ],
+            }),
+            200,
+          );
+        });
+        final tmdbApi = TmdbApiClient(apiKey: 'key', client: client);
+        final database = WatchTrackerDatabase();
+        final repository = MediaRepository(tmdbApi, null, database);
+
+        // Remplit le cache au-delà de sa capacité (20 entrées) pour forcer
+        // une éviction de la saison la plus anciennement utilisée.
+        for (var season = 1; season <= 21; season++) {
+          await repository.getSeasonEpisodes(20, season);
+        }
+
+        requestedPaths.clear();
+
+        // La saison 1 (la moins récemment utilisée) a été évincée : elle
+        // doit redéclencher un appel réseau.
+        await repository.getSeasonEpisodes(20, 1);
+        expect(requestedPaths, contains('/3/tv/20/season/1'));
+
+        requestedPaths.clear();
+
+        // La saison 21 (la plus récemment utilisée) est toujours en cache.
+        await repository.getSeasonEpisodes(20, 21);
+        expect(requestedPaths, isEmpty);
+      },
+    );
+  });
+
   group('WatchTrackerDatabase onCreate (fresh install, version 7)', () {
     test('creates every expected table', () async {
       final db = WatchTrackerDatabase();
