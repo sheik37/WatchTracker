@@ -42,19 +42,17 @@ fail() {
 mkdir -p "$BACKUP_DIR"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-TMP_SQL="$BACKUP_DIR/.watchtracker_${TIMESTAMP}.sql"
+TMP_SQL="$(mktemp "$BACKUP_DIR/.watchtracker_${TIMESTAMP}_XXXXXX")" || fail "Cannot create temporary dump file in $BACKUP_DIR."
+trap 'rm -f "$TMP_SQL"' EXIT
 BACKUP_FILE="$BACKUP_DIR/watchtracker_${TIMESTAMP}.sql.gz"
 
 if ! docker exec "$CONTAINER_NAME" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists > "$TMP_SQL"; then
-  rm -f "$TMP_SQL"
   fail "PostgreSQL dump failed (container=$CONTAINER_NAME db=$POSTGRES_DB)."
 fi
 
 if ! gzip -c "$TMP_SQL" > "$BACKUP_FILE"; then
-  rm -f "$TMP_SQL"
   fail "Gzip compression failed for backup file."
 fi
-rm -f "$TMP_SQL"
 
 if ! find "$BACKUP_DIR" -type f -name "watchtracker_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete; then
   log_error "Retention cleanup failed for $BACKUP_DIR."

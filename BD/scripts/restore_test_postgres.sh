@@ -42,7 +42,10 @@ fail() {
 if [ "${1:-}" != "" ]; then
   BACKUP_FILE="$1"
 else
-  BACKUP_FILE="$(ls -1t "$BACKUP_DIR"/watchtracker_*.sql.gz "$BACKUP_DIR"/.watchtracker_*.sql.gz 2>/dev/null | head -n 1 || true)"
+  # Ne matcher que les vrais fichiers de sauvegarde finalises
+  # (watchtracker_*.sql.gz), jamais les fichiers temporaires/caches
+  # (ex: .watchtracker_*) laisses par un backup interrompu.
+  BACKUP_FILE="$(ls -1t "$BACKUP_DIR"/watchtracker_*.sql.gz 2>/dev/null | head -n 1 || true)"
 fi
 
 if [ ! -f "$BACKUP_FILE" ]; then
