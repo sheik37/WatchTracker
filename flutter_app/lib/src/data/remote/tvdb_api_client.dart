@@ -1,15 +1,14 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
 import '../models/details_models.dart';
+import 'api_http_client.dart';
 
 class TvdbApiClient {
   TvdbApiClient({required this.apiKey, http.Client? client})
-    : _client = client ?? http.Client();
+    : _http = ApiHttpClient(baseUrl: _baseUrl, client: client);
 
   final String apiKey;
-  final http.Client _client;
+  final ApiHttpClient _http;
 
   static const _baseUrl = 'https://api4.thetvdb.com/v4';
 
@@ -18,16 +17,11 @@ class TvdbApiClient {
   Future<void> _ensureAuth({bool isRetry = false}) async {
     if (_token != null) return;
     if (apiKey.isEmpty) throw StateError('TVDB_API_KEY manquant');
-    final uri = Uri.parse('$_baseUrl/login');
-    final response = await _client.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'apikey': apiKey}),
+    final body = await _http.postJson(
+      '/login',
+      body: {'apikey': apiKey},
+      errorLabel: 'TVDB login',
     );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('TVDB login ${response.statusCode}: ${response.body}');
-    }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
     final data = body['data'] as Map<String, dynamic>?;
     _token = data?['token'] as String?;
     if (_token == null) throw StateError('TVDB login: no token in response');
@@ -39,20 +33,17 @@ class TvdbApiClient {
     bool isRetry = false,
   }) async {
     await _ensureAuth(isRetry: isRetry);
-    final uri = Uri.parse('$_baseUrl$path')
-        .replace(queryParameters: params.isEmpty ? null : params);
-    final response = await _client.get(
-      uri,
-      headers: {'Authorization': 'Bearer $_token'},
+    final response = await _http.getRaw(
+      path,
+      queryParameters: params,
+      headers: {'Authorization': '******'},
     );
     if (response.statusCode == 401 && !isRetry) {
       _token = null;
       return _get(path, params, isRetry: true);
     }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('TVDB ${response.statusCode}: ${response.body}');
-    }
-    return jsonDecode(response.body) as Map<String, dynamic>;
+    _http.ensureSuccess(response, 'TVDB');
+    return _http.decodeJson(response);
   }
 
   Future<List<Season>> getSeasonsWithCounts(int tvdbId) async {
