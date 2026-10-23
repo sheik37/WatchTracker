@@ -1184,6 +1184,57 @@ void main() {
       expect(find.text('Supprimer les derniers rewatches'), findsNothing);
     },
   );
+
+  testWidgets('ajoute aux suivis via la barre du bas quand non suivi', (
+    tester,
+  ) async {
+    final repo = _FakeMediaRepository(
+      details: titleDetails,
+      tracked: false,
+      status: null,
+      progress: const [],
+      episodeViewCounts: const {},
+      seasonEpisodes: const {},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: DetailsScreen(repository: repo, media: titleMedia)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('+ Ajouter la série'), findsOneWidget);
+    await tester.tap(find.text('+ Ajouter la série'));
+    await tester.pumpAndSettle();
+
+    expect(repo.addToWatchlistCallCount, 1);
+    expect(find.text('+ Ajouter la série'), findsNothing);
+  });
+
+  testWidgets('retire des suivis via le menu après confirmation', (
+    tester,
+  ) async {
+    final repo = _FakeMediaRepository(
+      details: titleDetails,
+      tracked: true,
+      status: WatchStatus.inProgress,
+      progress: const [],
+      episodeViewCounts: const {},
+      seasonEpisodes: const {},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: DetailsScreen(repository: repo, media: titleMedia)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_vert_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retirer des suivis'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supprimer'));
+    await tester.pumpAndSettle();
+
+    expect(repo.removeFromWatchlistCallCount, 1);
+    expect(find.text('+ Ajouter la série'), findsOneWidget);
+  });
 }
 
 class _FakeMediaRepository extends MediaRepository {
@@ -1220,6 +1271,8 @@ class _FakeMediaRepository extends MediaRepository {
   final Object? detailsError;
   late int _movieViewCount;
   late List<int> _movieWatchDates = List<int>.from(movieWatchDates);
+  int addToWatchlistCallCount = 0;
+  int removeFromWatchlistCallCount = 0;
 
   @override
   Future<MediaDetails> getMovieDetails(int id) async {
@@ -1301,7 +1354,14 @@ class _FakeMediaRepository extends MediaRepository {
     WatchCategory category,
     WatchStatus status,
     int totalEpisodes,
-  ) async {}
+  ) async {
+    addToWatchlistCallCount++;
+  }
+
+  @override
+  Future<void> removeFromWatchlist(Media media, WatchCategory category) async {
+    removeFromWatchlistCallCount++;
+  }
 
   @override
   Future<void> updateWatchStatus(
