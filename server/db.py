@@ -72,6 +72,14 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(schema_sql)
+            # Le bloc DO $$ ci-dessous ne contient plus que de vraies migrations
+            # incrémentales pour les bases existantes créées avant l'ajout de
+            # certaines tables/colonnes/index à watchtracker_schema.sql
+            # (ALTER TABLE, changements de PK/FK, backfills de données,
+            # suppression de table obsolète). Les tables et index déjà définis
+            # dans watchtracker_schema.sql (exécuté juste au-dessus, avec
+            # CREATE TABLE/INDEX IF NOT EXISTS) ne sont plus recréés ici pour
+            # éviter la duplication du schéma entre les deux fichiers.
             cur.execute("""
                 DO $$
                 DECLARE legacy_user_id BIGINT;
@@ -150,41 +158,10 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ALTER COLUMN sync_updated_at SET NOT NULL;
                     END IF;
 
-                    CREATE TABLE IF NOT EXISTS watchlist_tombstones (
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        id INTEGER NOT NULL,
-                        media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'tv')),
-                        content_category TEXT NOT NULL CHECK (content_category IN ('films', 'series', 'anime')),
-                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        PRIMARY KEY (user_id, id, media_type, content_category)
-                    );
-
-                    CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        media_id INTEGER NOT NULL,
-                        season_number INTEGER NOT NULL,
-                        episode_number INTEGER NOT NULL,
-                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        PRIMARY KEY (user_id, media_id, season_number, episode_number)
-                    );
-
-                    CREATE TABLE IF NOT EXISTS episode_watch_events (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        media_id INTEGER NOT NULL,
-                        season_number INTEGER NOT NULL,
-                        episode_number INTEGER NOT NULL,
-                        watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS movie_watch_events (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        media_id INTEGER NOT NULL,
-                        watched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
+                    -- watchlist_tombstones, episode_progress_tombstones,
+                    -- episode_watch_events et movie_watch_events sont déjà
+                    -- créées par watchtracker_schema.sql ci-dessus ; plus
+                    -- besoin de les recréer ici.
 
                     IF NOT EXISTS (
                         SELECT 1 FROM information_schema.columns
@@ -249,82 +226,12 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                             ADD COLUMN display_name TEXT;
                     END IF;
 
-                    CREATE TABLE IF NOT EXISTS email_verification_tokens (
-                        token_hash TEXT PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        used_at TIMESTAMPTZ
-                    );
-
-                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-                        token_hash TEXT PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        used_at TIMESTAMPTZ
-                    );
-
-                    CREATE TABLE IF NOT EXISTS password_history (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        password_hash TEXT NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS email_delivery_events (
-                        id BIGSERIAL PRIMARY KEY,
-                        email_type TEXT NOT NULL CHECK (email_type IN ('verification', 'password_reset')),
-                        quota_day DATE NOT NULL DEFAULT CURRENT_DATE,
-                        status TEXT NOT NULL CHECK (status IN ('reserved', 'sent', 'failed')),
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
-
-                    CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
-                        token_hash TEXT PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        family_id TEXT NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        revoked_at TIMESTAMPTZ,
-                        replaced_by_token_hash TEXT
-                    );
-
-                    CREATE TABLE IF NOT EXISTS auth_rate_limit_states (
-                        endpoint TEXT NOT NULL,
-                        scope_key TEXT NOT NULL,
-                        failure_count INTEGER NOT NULL DEFAULT 0,
-                        first_failure_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        last_failure_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        blocked_until TIMESTAMPTZ,
-                        PRIMARY KEY (endpoint, scope_key)
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at
-                        ON auth_tokens (expires_at);
-                    CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id
-                        ON auth_refresh_tokens (user_id);
-                    CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at
-                        ON auth_refresh_tokens (expires_at);
-                    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id
-                        ON email_verification_tokens (user_id);
-                    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
-                        ON password_reset_tokens (user_id);
-                    CREATE INDEX IF NOT EXISTS idx_password_history_user_id_created_at
-                        ON password_history (user_id, created_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_email_delivery_events_quota_day_status
-                        ON email_delivery_events (quota_day, status);
-                    CREATE INDEX IF NOT EXISTS idx_auth_rate_limit_states_last_failure_at
-                        ON auth_rate_limit_states (last_failure_at);
-                    CREATE INDEX IF NOT EXISTS idx_watchlist_tombstones_user_deleted
-                        ON watchlist_tombstones (user_id, deleted_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_episode_progress_tombstones_user_deleted
-                        ON episode_progress_tombstones (user_id, deleted_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_episode_watch_events_lookup
-                        ON episode_watch_events (user_id, media_id, season_number, episode_number, watched_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_movie_watch_events_lookup
-                        ON movie_watch_events (user_id, media_id, watched_at DESC);
+                    -- email_verification_tokens, password_reset_tokens,
+                    -- password_history, email_delivery_events,
+                    -- auth_refresh_tokens, auth_rate_limit_states et tous
+                    -- leurs index sont déjà créés par
+                    -- watchtracker_schema.sql ci-dessus ; plus besoin de les
+                    -- recréer ici.
 
                     INSERT INTO episode_watch_events (
                         user_id,
@@ -388,14 +295,9 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
                         ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
                     ALTER TABLE episode_progress
                         ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
-                    CREATE TABLE IF NOT EXISTS episode_progress_tombstones (
-                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        media_id INTEGER NOT NULL,
-                        season_number INTEGER NOT NULL,
-                        episode_number INTEGER NOT NULL,
-                        deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        PRIMARY KEY (user_id, media_id, season_number, episode_number)
-                    );
+                    -- episode_progress_tombstones est déjà créée par
+                    -- watchtracker_schema.sql ci-dessus (et avait déjà été
+                    -- recréée plus haut dans ce même bloc de migration).
                     DROP TABLE IF EXISTS anime_structures;
                 END $$;
                 """)
