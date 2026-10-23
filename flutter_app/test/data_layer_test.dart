@@ -522,6 +522,26 @@ void main() {
       },
     );
   });
+
+  group('WatchTrackerDatabase.close', () {
+    test('closes the connection and allows a later reopen', () async {
+      final db = WatchTrackerDatabase();
+      final database = await db.database;
+      expect(database.isOpen, isTrue);
+
+      await db.close();
+      expect(database.isOpen, isFalse);
+
+      // A subsequent access transparently reopens a fresh connection.
+      final reopened = await db.database;
+      expect(reopened.isOpen, isTrue);
+    });
+
+    test('is a no-op when the database was never opened', () async {
+      final db = WatchTrackerDatabase();
+      await db.close();
+    });
+  });
 }
 
 Future<List<String>> _tableNames(dynamic db) async {
