@@ -108,6 +108,48 @@ def test_watchlist_endpoints(monkeypatch):
     assert payload["episode_progress"][0]["media_id"] == 1
 
 
+def test_sync_snapshot_reads_are_four_separate_sequential_crud_calls(monkeypatch):
+    # Caractérise le comportement ACTUEL (avant optimisation) : /sync/snapshot
+    # effectue 4 lectures indépendantes, une par fonction crud, plutôt qu'une
+    # seule fonction ouvrant une unique connexion/transaction.
+    calls = []
+
+    def record(name):
+        def _inner(*args, **kwargs):
+            calls.append(name)
+            return []
+
+        return _inner
+
+    monkeypatch.setattr(
+        app_module, "list_watchlist_since", record("list_watchlist_since")
+    )
+    monkeypatch.setattr(
+        app_module,
+        "list_all_episode_progress_since",
+        record("list_all_episode_progress_since"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "list_watchlist_tombstones_since",
+        record("list_watchlist_tombstones_since"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "list_episode_progress_tombstones_since",
+        record("list_episode_progress_tombstones_since"),
+    )
+
+    response = client.get("/sync/snapshot")
+    assert response.status_code == 200
+    assert calls == [
+        "list_watchlist_since",
+        "list_all_episode_progress_since",
+        "list_watchlist_tombstones_since",
+        "list_episode_progress_tombstones_since",
+    ]
+
+
 def test_watchlist_movie_rewatch_endpoint(monkeypatch):
     called = {}
 
