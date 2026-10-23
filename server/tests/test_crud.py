@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-import crud as crud_module
+import episode_crud
 
 
 def test_set_episode_watched_preserves_new_first_watch_timestamp():
@@ -11,7 +11,7 @@ def test_set_episode_watched_preserves_new_first_watch_timestamp():
     }
     cursor = _FakeCursor(row)
 
-    crud_module._set_episode_watched(
+    episode_crud._set_episode_watched(
         cursor,
         user_id=1,
         media_id=42,

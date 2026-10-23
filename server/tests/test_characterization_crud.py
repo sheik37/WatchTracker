@@ -10,7 +10,8 @@ petites doublures qui enregistrent les requêtes SQL exécutées, à l'image de
 import contextlib
 from datetime import datetime, timezone
 
-import crud
+import auth_crud
+import episode_crud
 from schemas import EpisodeProgressItemIn
 
 
@@ -43,14 +44,14 @@ def test_replace_episode_progress_issues_queries_per_episode_before_optimisation
     monkeypatch,
 ):
     cur = _EpisodeLoopCursor()
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
     items = [
         EpisodeProgressItemIn(season_number=1, episode_number=1, is_watched=True),
         EpisodeProgressItemIn(season_number=1, episode_number=2, is_watched=True),
         EpisodeProgressItemIn(season_number=1, episode_number=3, is_watched=False),
     ]
-    crud.replace_episode_progress(user_id=1, media_id=99, items=items)
+    episode_crud.replace_episode_progress(user_id=1, media_id=99, items=items)
 
     # Comportement actuel (avant optimisation) : chaque item "watched" émet 4
     # requêtes (SELECT FOR UPDATE, INSERT watch_events, DELETE tombstone,
@@ -64,8 +65,8 @@ def test_replace_episode_progress_noop_without_db_access_when_no_items(monkeypat
     def boom():
         raise AssertionError("cursor() ne doit pas être ouvert si items est vide")
 
-    monkeypatch.setattr(crud, "cursor", lambda: boom())
-    crud.replace_episode_progress(user_id=1, media_id=99, items=[])
+    monkeypatch.setattr(episode_crud, "cursor", lambda: boom())
+    episode_crud.replace_episode_progress(user_id=1, media_id=99, items=[])
 
 
 def test_rewatch_episode_season_dedupes_sorts_and_loops_per_episode(monkeypatch):
@@ -77,10 +78,10 @@ def test_rewatch_episode_season_dedupes_sorts_and_loops_per_episode(monkeypatch)
     ):
         calls.append(episode_number)
 
-    monkeypatch.setattr(crud, "_set_episode_watched", fake_set_watched)
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(object()))
+    monkeypatch.setattr(episode_crud, "_set_episode_watched", fake_set_watched)
+    monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(object()))
 
-    crud.rewatch_episode_season(
+    episode_crud.rewatch_episode_season(
         user_id=1, media_id=5, season_number=2, episode_numbers=[3, 1, 3, 0, 2]
     )
 
@@ -93,8 +94,8 @@ def test_rewatch_episode_season_noop_without_db_access_when_all_invalid(monkeypa
     def boom():
         raise AssertionError("cursor() ne doit pas être ouvert sans épisode valide")
 
-    monkeypatch.setattr(crud, "cursor", lambda: boom())
-    crud.rewatch_episode_season(
+    monkeypatch.setattr(episode_crud, "cursor", lambda: boom())
+    episode_crud.rewatch_episode_season(
         user_id=1, media_id=5, season_number=2, episode_numbers=[0, -1]
     )
 
@@ -122,9 +123,9 @@ class _VerifyEmailCursor:
 
 def test_verify_email_token_marks_user_verified_and_token_used(monkeypatch):
     cur = _VerifyEmailCursor({"user_id": 11})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
-    assert crud.verify_email_token("sometoken") is True
+    assert auth_crud.verify_email_token("sometoken") is True
     assert any(
         "UPDATE users" in sql and "email_verified_at = now()" in sql
         for sql in cur.executed
@@ -139,9 +140,9 @@ def test_verify_email_token_returns_false_and_stops_at_select_when_missing(
     monkeypatch,
 ):
     cur = _VerifyEmailCursor(None)
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
-    assert crud.verify_email_token("bad-token") is False
+    assert auth_crud.verify_email_token("bad-token") is False
     assert len(cur.executed) == 1  # seul le SELECT a été exécuté
 
 
@@ -172,44 +173,41 @@ def test_reset_password_with_token_rejects_weak_password_without_opening_cursor(
     def boom():
         raise AssertionError("cursor() ne doit pas être ouvert pour un mdp faible")
 
-    monkeypatch.setattr(crud, "cursor", lambda: boom())
-    assert crud.reset_password_with_token("tok", "short") == "password_too_short"
+    monkeypatch.setattr(auth_crud, "cursor", lambda: boom())
+    assert auth_crud.reset_password_with_token("tok", "short") == "password_too_short"
 
 
 def test_reset_password_with_token_rejects_same_as_current(monkeypatch):
     cur = _ResetPasswordCursor({"user_id": 3, "password_hash": "irrelevant"})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
-    monkeypatch.setattr(crud, "_verify_password", lambda password, encoded: True)
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: True)
 
-    result = crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
+    result = auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
     assert result == "same_as_current"
     assert len(cur.executed) == 1  # pas de mutation si mdp identique
 
 
 def test_reset_password_with_token_rejects_reused_password(monkeypatch):
     cur = _ResetPasswordCursor({"user_id": 3, "password_hash": "irrelevant"})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
-    monkeypatch.setattr(crud, "_verify_password", lambda password, encoded: False)
-    monkeypatch.setattr(
-        crud, "_is_password_reused", lambda cur, user_id, password: True
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: False)
+    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: True
     )
 
-    assert crud.reset_password_with_token("tok", "Str0ngPassw0rd!") == "password_reused"
+    assert auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!") == "password_reused"
 
 
 def test_reset_password_with_token_updates_and_revokes_sessions(monkeypatch):
     cur = _ResetPasswordCursor({"user_id": 3, "password_hash": "irrelevant"})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
-    monkeypatch.setattr(crud, "_verify_password", lambda password, encoded: False)
-    monkeypatch.setattr(
-        crud, "_is_password_reused", lambda cur, user_id, password: False
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: False)
+    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: False
     )
     revoked: list[int] = []
-    monkeypatch.setattr(
-        crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
+    monkeypatch.setattr(auth_crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
     )
 
-    result = crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
+    result = auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
     assert result == "updated"
     assert revoked == [3]
     assert any(
@@ -242,10 +240,10 @@ class _ChangePasswordCursor:
 
 def test_change_password_for_user_rejects_invalid_current_password(monkeypatch):
     cur = _ChangePasswordCursor({"password_hash": "irrelevant"})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
-    monkeypatch.setattr(crud, "_verify_password", lambda password, encoded: False)
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: False)
 
-    result = crud.change_password_for_user(
+    result = auth_crud.change_password_for_user(
         user_id=1, current_password="bad", new_password="Str0ngPassw0rd!"
     )
     assert result == "current_password_invalid"
@@ -253,7 +251,7 @@ def test_change_password_for_user_rejects_invalid_current_password(monkeypatch):
 
 def test_change_password_for_user_updates_and_revokes_sessions(monkeypatch):
     cur = _ChangePasswordCursor({"password_hash": "irrelevant"})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
     verify_calls: list[str] = []
 
     def fake_verify(password, encoded):
@@ -261,16 +259,14 @@ def test_change_password_for_user_updates_and_revokes_sessions(monkeypatch):
         # Le mot de passe courant est valide, le nouveau est différent.
         return password == "current-pw-Str0ng!"
 
-    monkeypatch.setattr(crud, "_verify_password", fake_verify)
-    monkeypatch.setattr(
-        crud, "_is_password_reused", lambda cur, user_id, password: False
+    monkeypatch.setattr(auth_crud, "_verify_password", fake_verify)
+    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: False
     )
     revoked: list[int] = []
-    monkeypatch.setattr(
-        crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
+    monkeypatch.setattr(auth_crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
     )
 
-    result = crud.change_password_for_user(
+    result = auth_crud.change_password_for_user(
         user_id=9, current_password="current-pw-Str0ng!", new_password="New-Str0ng!"
     )
     assert result == "updated"
@@ -301,9 +297,9 @@ class _AuthTokenCursor:
 
 def test_get_user_id_from_token_always_updates_last_used_at_currently(monkeypatch):
     cur = _AuthTokenCursor({"user_id": 42})
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
-    assert crud.get_user_id_from_token("tok") == 42
+    assert auth_crud.get_user_id_from_token("tok") == 42
     update_calls = [
         sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
     ]
@@ -316,7 +312,7 @@ def test_get_user_id_from_token_returns_none_without_update_when_token_missing(
     monkeypatch,
 ):
     cur = _AuthTokenCursor(None)
-    monkeypatch.setattr(crud, "cursor", lambda: contextlib.nullcontext(cur))
+    monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
-    assert crud.get_user_id_from_token("missing") is None
+    assert auth_crud.get_user_id_from_token("missing") is None
     assert len(cur.executed) == 1  # seul le SELECT est exécuté
