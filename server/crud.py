@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -10,6 +9,8 @@ from schemas import (
     EpisodeProgressItemIn,
     WatchlistItemIn,
 )
+from security import hash_password as _hash_password
+from security import verify_password as _verify_password
 
 TOKEN_TTL_HOURS = int(os.getenv("AUTH_TOKEN_TTL_HOURS", "1"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_TTL_DAYS", "30"))
@@ -31,29 +32,6 @@ EMAIL_DELIVERY_LOG_RETENTION_DAYS = int(
     os.getenv("EMAIL_DELIVERY_LOG_RETENTION_DAYS", "30")
 )
 PASSWORD_HISTORY_LIMIT = int(os.getenv("PASSWORD_HISTORY_LIMIT", "5"))
-
-
-def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    rounds = 150_000
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
-    ).hex()
-    return f"pbkdf2_sha256${rounds}${salt}${digest}"
-
-
-def _verify_password(password: str, encoded: str) -> bool:
-    try:
-        algo, rounds_text, salt, digest = encoded.split("$", 3)
-        if algo != "pbkdf2_sha256":
-            return False
-        rounds = int(rounds_text)
-    except (ValueError, TypeError):
-        return False
-    check = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
-    ).hex()
-    return hmac.compare_digest(check, digest)
 
 
 def _validate_password_policy(password: str) -> Optional[str]:

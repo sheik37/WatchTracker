@@ -1,7 +1,4 @@
-import hashlib
-import hmac
 import os
-import secrets
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -9,6 +6,9 @@ from typing import Optional
 import psycopg2  # noqa: F401 - requis pour la compatibilité psycopg2.extras/pool
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
+
+from security import hash_password as _hash_password
+from security import verify_password as _verify_password
 
 _pool: Optional[SimpleConnectionPool] = None
 
@@ -466,29 +466,3 @@ def initialize_schema(schema_filename: str = "sql/watchtracker_schema.sql") -> N
     finally:
         conn.autocommit = False
         pool.putconn(conn)
-
-
-def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    rounds = 150_000
-    digest = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt.encode("utf-8"),
-        rounds,
-    ).hex()
-    return f"pbkdf2_sha256${rounds}${salt}${digest}"
-
-
-def _verify_password(password: str, encoded: str) -> bool:
-    try:
-        algo, rounds_text, salt, digest = encoded.split("$", 3)
-        if algo != "pbkdf2_sha256":
-            return False
-        rounds = int(rounds_text)
-    except (TypeError, ValueError):
-        return False
-    check = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds
-    ).hex()
-    return hmac.compare_digest(check, digest)
