@@ -2,6 +2,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/date_formatter.dart';
@@ -51,7 +52,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
   double _tvSwipeDelta = 0;
   int _nextEpisodeJumpToken = 0;
   Episode? _nextEpisodeTarget;
-  bool _showExtendedNextEpisodeCta = true;
+  final ValueNotifier<bool> _showExtendedNextEpisodeCta = ValueNotifier<bool>(
+    true,
+  );
   bool _navigatingToNextEpisode = false;
   bool _fetchedFromCache = false;
 
@@ -66,16 +69,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
   void dispose() {
     _scrollCtrl.removeListener(_onScrollChanged);
     _scrollCtrl.dispose();
+    _showExtendedNextEpisodeCta.dispose();
     super.dispose();
   }
 
   void _onScrollChanged() {
     if (!_scrollCtrl.hasClients) return;
     final showExtended = _scrollCtrl.offset < 64;
-    if (showExtended != _showExtendedNextEpisodeCta && mounted) {
-      setState(() {
-        _showExtendedNextEpisodeCta = showExtended;
-      });
+    if (showExtended != _showExtendedNextEpisodeCta.value) {
+      _showExtendedNextEpisodeCta.value = showExtended;
     }
   }
 
@@ -882,8 +884,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       }
       return;
     }
-    final orderedSeasons = _orderedSeasons(details.seasons);
-    final offsets = _seasonOffsets(orderedSeasons);
+    final (orderedSeasons, offsets) = _orderedSeasonsAndOffsets(details);
     final seasonOffset = offsets[episode.seasonNumber] ?? 0;
     final expectedPreviousCount = seasonOffset + episode.episodeNumber - 1;
 
@@ -1221,8 +1222,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _openEpisodeDetailPage(Episode episode) async {
     final details = _details;
     if (details == null) return;
-    final orderedSeasons = _orderedSeasons(details.seasons);
-    final offsets = _seasonOffsets(orderedSeasons);
+    final (orderedSeasons, offsets) = _orderedSeasonsAndOffsets(details);
 
     final allEpisodes = <Episode>[];
     for (final season in orderedSeasons) {
@@ -1360,7 +1360,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       _navigatingToNextEpisode = true;
     });
     try {
-      final orderedSeasons = _orderedSeasons(details.seasons);
+      final (orderedSeasons, _) = _orderedSeasonsAndOffsets(details);
       late final Episode? nextEpisode;
       try {
         nextEpisode = await _findNextEpisodeToWatch(details, orderedSeasons);
@@ -1401,71 +1401,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   Widget _buildNextEpisodeFab(bool isTV) {
     if (!isTV) return const SizedBox.shrink();
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.primaryContainer,
-      elevation: 6,
-      borderRadius: BorderRadius.circular(28),
-      child: InkWell(
-        key: const ValueKey('next-episode-fab'),
-        borderRadius: BorderRadius.circular(28),
-        onTap: _navigatingToNextEpisode ? null : _goToNextEpisode,
-        child: AnimatedContainer(
-          key: const ValueKey('next-episode-fab-container'),
-          duration: const Duration(milliseconds: 380),
-          curve: Curves.easeInOutCubic,
-          height: 56,
-          width: _showExtendedNextEpisodeCta ? 186 : 56,
-          child: Stack(
-            alignment: Alignment.centerLeft,
-            children: [
-              Positioned(
-                left: 16,
-                child: _navigatingToNextEpisode
-                    ? SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          color: colorScheme.onPrimaryContainer,
-                        ),
-                      )
-                    : Icon(
-                        Icons.play_arrow_rounded,
-                        color: colorScheme.onPrimaryContainer,
-                      ),
-              ),
-              Positioned(
-                left: 44,
-                right: 16,
-                child: ClipRect(
-                  child: AnimatedAlign(
-                    alignment: Alignment.centerLeft,
-                    duration: const Duration(milliseconds: 380),
-                    curve: Curves.easeInOutCubic,
-                    widthFactor: _showExtendedNextEpisodeCta ? 1 : 0,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 320),
-                      curve: Curves.easeInOutCubic,
-                      opacity: _showExtendedNextEpisodeCta ? 1 : 0,
-                      child: Text(
-                        'Aller au prochain',
-                        key: const ValueKey('next-episode-fab-label'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _NextEpisodeFab(
+      showExtended: _showExtendedNextEpisodeCta,
+      navigating: _navigatingToNextEpisode,
+      onTap: _navigatingToNextEpisode ? null : _goToNextEpisode,
     );
   }
 
@@ -1648,8 +1587,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
     final isTV = details.mediaType == MediaType.tv;
     final progressColor = (_tracked && isTV) ? _progressColor() : null;
-    final orderedSeasons = _orderedSeasons(details.seasons);
-    final seasonOffsets = _seasonOffsets(orderedSeasons);
+    final (orderedSeasons, seasonOffsets) = _orderedSeasonsAndOffsets(details);
     final statusBarHeight = MediaQuery.paddingOf(context).top;
 
     return Scaffold(
@@ -1761,6 +1699,116 @@ class _DetailsScreenState extends State<DetailsScreen> {
       offset += season.episodeCount < 0 ? 0 : season.episodeCount;
     }
     return map;
+  }
+
+  MediaDetails? _seasonsCacheSource;
+  List<Season>? _cachedOrderedSeasons;
+  Map<int, int>? _cachedSeasonOffsets;
+
+  /// Returns the ordered seasons and their episode offsets for [details],
+  /// recomputing only when `details` itself changes (new instance returned
+  /// by `_load`/`_refreshProgressState`) instead of on every `build()`.
+  (List<Season>, Map<int, int>) _orderedSeasonsAndOffsets(
+    MediaDetails details,
+  ) {
+    if (!identical(_seasonsCacheSource, details)) {
+      final ordered = _orderedSeasons(details.seasons);
+      _seasonsCacheSource = details;
+      _cachedOrderedSeasons = ordered;
+      _cachedSeasonOffsets = _seasonOffsets(ordered);
+    }
+    return (_cachedOrderedSeasons!, _cachedSeasonOffsets!);
+  }
+}
+
+/// Floating "next episode" CTA, isolated from [_DetailsScreenState] so that
+/// toggling its compact/extended label on scroll (every scroll frame) only
+/// rebuilds this small subtree via [showExtended], instead of the whole
+/// details screen.
+class _NextEpisodeFab extends StatelessWidget {
+  const _NextEpisodeFab({
+    required this.showExtended,
+    required this.navigating,
+    required this.onTap,
+  });
+
+  final ValueListenable<bool> showExtended;
+  final bool navigating;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.primaryContainer,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        key: const ValueKey('next-episode-fab'),
+        borderRadius: BorderRadius.circular(28),
+        onTap: onTap,
+        child: ValueListenableBuilder<bool>(
+          valueListenable: showExtended,
+          builder: (context, extended, _) {
+            return AnimatedContainer(
+              key: const ValueKey('next-episode-fab-container'),
+              duration: const Duration(milliseconds: 380),
+              curve: Curves.easeInOutCubic,
+              height: 56,
+              width: extended ? 186 : 56,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Positioned(
+                    left: 16,
+                    child: navigating
+                        ? SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.2,
+                              color: colorScheme.onPrimaryContainer,
+                            ),
+                          )
+                        : Icon(
+                            Icons.play_arrow_rounded,
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                  ),
+                  Positioned(
+                    left: 44,
+                    right: 16,
+                    child: ClipRect(
+                      child: AnimatedAlign(
+                        alignment: Alignment.centerLeft,
+                        duration: const Duration(milliseconds: 380),
+                        curve: Curves.easeInOutCubic,
+                        widthFactor: extended ? 1 : 0,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 320),
+                          curve: Curves.easeInOutCubic,
+                          opacity: extended ? 1 : 0,
+                          child: Text(
+                            'Aller au prochain',
+                            key: const ValueKey('next-episode-fab-label'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 }
 
