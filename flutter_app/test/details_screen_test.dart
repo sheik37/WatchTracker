@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_app/src/data/local/watchtracker_database.dart';
 import 'package:flutter_app/src/data/models/backend_models.dart';
@@ -161,6 +163,8 @@ void main() {
     bool Function(Episode)? isReleasedCheck,
     Future<void> Function(Episode, bool)? onToggleWatched,
     List<Episode>? episodeList,
+    Set<int> unloadedSeasons = const {},
+    Future<List<Episode>> Function(int)? loadSeasonEpisodes,
     Map<int, int>? seasonOffsets,
     String? seriesTitle,
     ({
@@ -185,6 +189,8 @@ void main() {
     return MaterialApp(
       home: EpisodeDetailPage(
         episodes: episodeList ?? episodes,
+        unloadedSeasons: unloadedSeasons,
+        loadSeasonEpisodes: loadSeasonEpisodes,
         initialIndex: initialIndex,
         mediaId: mediaId,
         repository: repo,
@@ -675,6 +681,141 @@ void main() {
     },
   );
 
+  testWidgets(
+    'ne lit que l’historique de l’épisode affiché parmi 1000 épisodes',
+    (tester) async {
+      final repo = _FakeMediaRepository(
+        details: titleDetails,
+        tracked: true,
+        status: WatchStatus.inProgress,
+        progress: const [],
+        episodeViewCounts: const {},
+        seasonEpisodes: const {},
+      );
+      final longSeason = List.generate(
+        1000,
+        (index) => Episode(
+          id: index + 1,
+          name: 'Épisode ${index + 1}',
+          overview: '',
+          episodeNumber: index + 1,
+          seasonNumber: 1,
+          stillPath: null,
+        ),
+      );
+      await tester.pumpWidget(
+        buildPage(repository: repo, episodeList: longSeason),
+      );
+      await tester.pumpAndSettle();
+      expect(repo.watchDateRequests, ['1_1']);
+
+      await tester.tap(find.byTooltip('Épisode suivant'));
+      await tester.pumpAndSettle();
+      expect(repo.watchDateRequests, ['1_1', '1_2']);
+    },
+  );
+
+  testWidgets('ouvre un épisode sans attendre les autres saisons', (
+    tester,
+  ) async {
+    final pendingSeason = Completer<List<Episode>>();
+    final requested = <int>[];
+    final repo = _FakeMediaRepository(
+      details: MediaDetails(
+        id: titleDetails.id,
+        title: titleDetails.title,
+        overview: '',
+        posterPath: null,
+        backdropPath: null,
+        releaseDate: null,
+        voteAverage: 0,
+        mediaType: MediaType.tv,
+        seasons: const [
+          Season(id: 1, name: 'Saison 1', seasonNumber: 1, episodeCount: 1),
+          Season(id: 2, name: 'Saison 2', seasonNumber: 2, episodeCount: 1),
+          Season(id: 3, name: 'Saison 3', seasonNumber: 3, episodeCount: 1000),
+        ],
+      ),
+      tracked: true,
+      status: WatchStatus.inProgress,
+      progress: const [],
+      episodeViewCounts: const {},
+      seasonEpisodes: {
+        1: [titleSeasonEpisodes.first],
+      },
+      seasonLoader: (season) {
+        requested.add(season);
+        return pendingSeason.future;
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DetailsScreen(repository: repo, media: titleMedia),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Épisodes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saison 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pilote'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EpisodeDetailPage), findsOneWidget);
+    expect(requested, isEmpty);
+
+    await tester.tap(find.byTooltip('Épisode suivant'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(requested, [2]);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(EpisodeDetailPage), findsOneWidget);
+
+    pendingSeason.complete([crossSeasonEpisodes.last]);
+    await tester.pumpAndSettle();
+    expect(find.text('Début de saison 2'), findsOneWidget);
+    expect(requested, [2]);
+  });
+
+  testWidgets('affiche une erreur et réessaie le chargement différé', (
+    tester,
+  ) async {
+    var attempts = 0;
+    final next = crossSeasonEpisodes.last;
+    await tester.pumpWidget(
+      buildPage(
+        episodeList: [
+          episodes.first,
+          Episode(
+            id: 0,
+            name: 'Épisode 1',
+            overview: '',
+            episodeNumber: 1,
+            seasonNumber: 2,
+            stillPath: null,
+          ),
+        ],
+        seasonOffsets: {1: 0, 2: 1},
+        unloadedSeasons: {2},
+        loadSeasonEpisodes: (_) async {
+          if (++attempts == 1) throw StateError('hors ligne');
+          return [next];
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(attempts, 0);
+    await tester.tap(find.byTooltip('Épisode suivant'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Impossible de charger cette saison'),
+      findsOneWidget,
+    );
+    expect(find.text('Marquer comme vu'), findsNothing);
+    await tester.tap(find.text('Réessayer'));
+    await tester.pumpAndSettle();
+    expect(attempts, 2);
+    expect(find.text(next.name), findsOneWidget);
+  });
   testWidgets('la revue conserve la date du premier visionnage', (
     tester,
   ) async {
@@ -709,6 +850,71 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('10/02/2024'), findsOneWidget);
+  });
+
+  testWidgets('la sélection de saison ne charge que l’épisode choisi', (
+    tester,
+  ) async {
+    final requested = <int>[];
+    final next = crossSeasonEpisodes.last;
+    await tester.pumpWidget(
+      buildPage(
+        episodeList: [
+          episodes.first,
+          Episode(
+            id: 0,
+            name: 'Épisode 1',
+            overview: '',
+            episodeNumber: 1,
+            seasonNumber: 2,
+            stillPath: null,
+          ),
+        ],
+        seasonOffsets: {1: 0, 2: 1},
+        unloadedSeasons: {2},
+        loadSeasonEpisodes: (season) async {
+          requested.add(season);
+          return [next];
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('S01 | E01'));
+    await tester.pumpAndSettle();
+    expect(requested, isEmpty);
+    final sheet = find.byType(BottomSheet);
+    await tester.tap(
+      find.descendant(
+        of: sheet,
+        matching: find.byIcon(Icons.arrow_forward_ios_rounded),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(requested, isEmpty);
+    await tester.tap(find.descendant(of: sheet, matching: find.text('E01')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.textContaining('S02 | E01'), findsOneWidget);
+    expect(find.text(next.name), findsOneWidget);
+    expect(requested, [2]);
+  });
+
+  testWidgets('une saison lente peut finir après fermeture de la page', (
+    tester,
+  ) async {
+    final pending = Completer<List<Episode>>();
+    await tester.pumpWidget(
+      buildPage(
+        unloadedSeasons: {1},
+        loadSeasonEpisodes: (_) => pending.future,
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    pending.complete(episodes);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -1198,7 +1404,9 @@ void main() {
       seasonEpisodes: const {},
     );
     await tester.pumpWidget(
-      MaterialApp(home: DetailsScreen(repository: repo, media: titleMedia)),
+      MaterialApp(
+        home: DetailsScreen(repository: repo, media: titleMedia),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -1222,7 +1430,9 @@ void main() {
       seasonEpisodes: const {},
     );
     await tester.pumpWidget(
-      MaterialApp(home: DetailsScreen(repository: repo, media: titleMedia)),
+      MaterialApp(
+        home: DetailsScreen(repository: repo, media: titleMedia),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -1251,6 +1461,7 @@ class _FakeMediaRepository extends MediaRepository {
     this.movieFirstWatchedAt,
     this.movieWatchDates = const [],
     this.detailsError,
+    this.seasonLoader,
   }) : super(
          TmdbApiClient(apiKey: ''),
          TvdbApiClient(apiKey: ''),
@@ -1270,6 +1481,8 @@ class _FakeMediaRepository extends MediaRepository {
   final int? movieFirstWatchedAt;
   final List<int> movieWatchDates;
   final Object? detailsError;
+  final Future<List<Episode>> Function(int)? seasonLoader;
+  final List<String> watchDateRequests = [];
   late int _movieViewCount;
   late List<int> _movieWatchDates = List<int>.from(movieWatchDates);
   int addToWatchlistCallCount = 0;
@@ -1327,7 +1540,11 @@ class _FakeMediaRepository extends MediaRepository {
     required int mediaId,
     required int seasonNumber,
     required int episodeNumber,
-  }) async => episodeWatchDates['${seasonNumber}_$episodeNumber'] ?? const [];
+  }) async {
+    final key = '${seasonNumber}_$episodeNumber';
+    watchDateRequests.add(key);
+    return episodeWatchDates[key] ?? const [];
+  }
 
   @override
   Future<List<int>> getMovieWatchDates(int mediaId) async => _movieWatchDates;
@@ -1372,6 +1589,9 @@ class _FakeMediaRepository extends MediaRepository {
   ) async {}
 
   @override
-  Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async =>
-      seasonEpisodes[seasonNumber] ?? const [];
+  Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async {
+    final cached = seasonEpisodes[seasonNumber];
+    if (cached != null) return cached;
+    return seasonLoader == null ? const [] : await seasonLoader!(seasonNumber);
+  }
 }

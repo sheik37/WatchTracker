@@ -1225,6 +1225,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final (orderedSeasons, offsets) = _orderedSeasonsAndOffsets(details);
 
     final allEpisodes = <Episode>[];
+    final unloadedSeasons = <int>{};
     for (final season in orderedSeasons) {
       final cached = _episodesBySeason[season.seasonNumber];
       if (cached != null && cached.isNotEmpty) {
@@ -1233,14 +1234,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
         _episodesBySeason[season.seasonNumber] = season.episodes;
         allEpisodes.addAll(season.episodes);
       } else {
-        try {
-          final fetched = await widget.repository.getSeasonEpisodes(
-            details.id,
-            season.seasonNumber,
-          );
-          _episodesBySeason[season.seasonNumber] = fetched;
-          allEpisodes.addAll(fetched);
-        } catch (_) {}
+        unloadedSeasons.add(season.seasonNumber);
+        allEpisodes.addAll(
+          List.generate(
+            season.episodeCount,
+            (index) => Episode(
+              id: 0,
+              name: 'Épisode ${index + 1}',
+              overview: '',
+              episodeNumber: index + 1,
+              seasonNumber: season.seasonNumber,
+              stillPath: null,
+            ),
+          ),
+        );
       }
     }
 
@@ -1257,6 +1264,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
       SlideUpRoute(
         builder: (ctx) => EpisodeDetailPage(
           episodes: allEpisodes,
+          unloadedSeasons: unloadedSeasons,
+          loadSeasonEpisodes: (seasonNumber) async {
+            final episodes = await widget.repository.getSeasonEpisodes(
+              details.id,
+              seasonNumber,
+            );
+            _episodesBySeason[seasonNumber] = episodes;
+            return episodes;
+          },
           initialIndex: index,
           mediaId: details.id,
           repository: widget.repository,

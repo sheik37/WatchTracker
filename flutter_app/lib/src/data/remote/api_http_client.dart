@@ -82,9 +82,7 @@ class ApiHttpClient {
   /// (2xx).
   void ensureSuccess(http.Response response, String errorLabel) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        '$errorLabel ${response.statusCode}: ${response.body}',
-      );
+      throw StateError('$errorLabel ${response.statusCode}: ${response.body}');
     }
   }
 

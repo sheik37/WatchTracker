@@ -55,7 +55,7 @@ class TvdbApiClient {
     final response = await _http.getRaw(
       path,
       queryParameters: params,
-      headers: {'Authorization': '******'},
+      headers: {'Authorization': 'Bearer $_token'},
     );
     if (response.statusCode == 401 && !isRetry) {
       _token = null;

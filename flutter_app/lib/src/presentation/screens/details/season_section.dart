@@ -9,6 +9,7 @@ import '../../../core/network_error_classifier.dart';
 import '../../../data/models/details_models.dart';
 import '../../../data/repositories/media_repository.dart';
 import 'rewatch_choice.dart';
+
 class WatchedToggleButton extends StatelessWidget {
   const WatchedToggleButton({
     super.key,
@@ -273,12 +274,10 @@ class _SeasonSectionState extends State<SeasonSection> {
         GlobalKey(debugLabel: 'episode-${ep.seasonNumber}-${ep.episodeNumber}'),
   );
 
-  bool _isWatched(Episode ep) =>
-      widget.watchedEpisodes.contains(ep.watchKey);
+  bool _isWatched(Episode ep) => widget.watchedEpisodes.contains(ep.watchKey);
 
   int _episodeViewCount(Episode ep) =>
-      widget.episodeViewCounts[ep.watchKey] ??
-      (_isWatched(ep) ? 1 : 0);
+      widget.episodeViewCounts[ep.watchKey] ?? (_isWatched(ep) ? 1 : 0);
 
   int? _episodeReviewCount(Episode ep) {
     final count = _episodeViewCount(ep);

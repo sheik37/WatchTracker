@@ -8,6 +8,7 @@ import '../../../data/models/details_models.dart';
 import '../../../data/repositories/media_repository.dart';
 import 'rewatch_choice.dart';
 import 'watch_history_dialog.dart';
+
 class EpisodeDetailPage extends StatefulWidget {
   const EpisodeDetailPage({
     super.key,
@@ -23,9 +24,13 @@ class EpisodeDetailPage extends StatefulWidget {
     required this.isReleasedCheck,
     required this.onToggleWatched,
     required this.getProgress,
+    this.unloadedSeasons = const {},
+    this.loadSeasonEpisodes,
   });
 
   final List<Episode> episodes;
+  final Set<int> unloadedSeasons;
+  final Future<List<Episode>> Function(int)? loadSeasonEpisodes;
   final int initialIndex;
   final int mediaId;
   final MediaRepository repository;
@@ -51,6 +56,11 @@ class EpisodeDetailPage extends StatefulWidget {
 }
 
 class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
+  late final List<Episode> _episodes;
+  late final Set<int> _unloadedSeasons;
+  final Map<int, Future<List<Episode>>> _seasonLoads = {};
+  final Map<int, Object> _seasonErrors = {};
+  final Set<String> _unavailableEpisodes = {};
   late int _currentIndex;
   late PageController _pageController;
   late Map<String, bool> _watchedLocal;
@@ -61,6 +71,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   @override
   void initState() {
     super.initState();
+    _episodes = List.of(widget.episodes);
+    _unloadedSeasons = Set.of(widget.unloadedSeasons);
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
     _watchedLocal = {
@@ -77,6 +89,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
     _episodeWatchDates = {};
     _loadWatchDates();
+    _loadCurrentSeason();
   }
 
   @override
@@ -105,6 +118,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   void _goTo(int index) {
+    if ((index - _currentIndex).abs() > 1) {
+      _pageController.jumpToPage(index);
+      return;
+    }
     _pageController.animateToPage(
       index,
       duration: const Duration(milliseconds: 300),
@@ -113,6 +130,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   Future<void> _toggleEpisode(Episode ep) async {
+    if (!_isAvailable(ep)) return;
     final k = '${ep.seasonNumber}_${ep.episodeNumber}';
     final isWatched = _watchedLocal[k] ?? false;
     var target = !isWatched;
@@ -291,15 +309,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         await widget.repository.getEpisodeViewCounts(widget.mediaId),
       );
       if (mounted) {
-        final refreshedDates = <String, List<int>>{};
-        for (final item in widget.episodes) {
-          refreshedDates['${item.seasonNumber}_${item.episodeNumber}'] =
-              await widget.repository.getEpisodeWatchDates(
-                mediaId: widget.mediaId,
-                seasonNumber: item.seasonNumber,
-                episodeNumber: item.episodeNumber,
-              );
-        }
+        final dates = await widget.repository.getEpisodeWatchDates(
+          mediaId: widget.mediaId,
+          seasonNumber: ep.seasonNumber,
+          episodeNumber: ep.episodeNumber,
+        );
+        if (!mounted) return;
         setState(() {
           _watchedLocal = {
             for (final episode in widget.episodes)
@@ -312,9 +327,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           _viewCountsLocal
             ..clear()
             ..addAll(viewCounts);
-          _episodeWatchDates
-            ..clear()
-            ..addAll(refreshedDates);
+          _episodeWatchDates[ep.watchKey] = dates;
         });
       }
     } catch (e) {
@@ -335,21 +348,89 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   Future<void> _loadWatchDates() async {
-    for (final ep in widget.episodes) {
-      try {
-        final dates = await widget.repository.getEpisodeWatchDates(
-          mediaId: widget.mediaId,
-          seasonNumber: ep.seasonNumber,
-          episodeNumber: ep.episodeNumber,
-        );
-        final key = '${ep.seasonNumber}_${ep.episodeNumber}';
-        if (mounted) {
-          setState(() {
-            _episodeWatchDates[key] = dates;
-          });
-        }
-      } catch (_) {}
+    final ep = _current;
+    try {
+      final dates = await widget.repository.getEpisodeWatchDates(
+        mediaId: widget.mediaId,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+      );
+      if (mounted) {
+        setState(() => _episodeWatchDates[ep.watchKey] = dates);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Impossible de charger les visionnages : $error'),
+        ),
+      );
     }
+  }
+
+  bool _isAvailable(Episode ep) =>
+      !_unloadedSeasons.contains(ep.seasonNumber) &&
+      !_unavailableEpisodes.contains(ep.watchKey);
+
+  Future<List<Episode>> _loadSeason(int seasonNumber) async {
+    final pending = _seasonLoads[seasonNumber];
+    if (pending != null) return pending;
+    if (!_unloadedSeasons.contains(seasonNumber)) {
+      return _episodes
+          .where(
+            (ep) =>
+                ep.seasonNumber == seasonNumber &&
+                !_unavailableEpisodes.contains(ep.watchKey),
+          )
+          .toList();
+    }
+    final loader = widget.loadSeasonEpisodes;
+    if (loader == null) {
+      throw StateError('Chargement de saison indisponible');
+    }
+    final future = loader(seasonNumber);
+    _seasonLoads[seasonNumber] = future;
+    try {
+      final loaded = await future;
+      if (!mounted) return loaded;
+      final byKey = {for (final ep in loaded) ep.watchKey: ep};
+      setState(() {
+        for (var index = 0; index < _episodes.length; index++) {
+          final ep = _episodes[index];
+          if (ep.seasonNumber != seasonNumber) continue;
+          final replacement = byKey[ep.watchKey];
+          if (replacement != null) {
+            _episodes[index] = replacement;
+          } else {
+            _unavailableEpisodes.add(ep.watchKey);
+          }
+        }
+        _unloadedSeasons.remove(seasonNumber);
+        _seasonErrors.remove(seasonNumber);
+      });
+      return loaded;
+    } catch (error) {
+      if (mounted) setState(() => _seasonErrors[seasonNumber] = error);
+      rethrow;
+    } finally {
+      _seasonLoads.remove(seasonNumber);
+    }
+  }
+
+  Future<void> _loadCurrentSeason() async {
+    final season = _current.seasonNumber;
+    if (!_unloadedSeasons.contains(season)) return;
+    try {
+      await _loadSeason(season);
+    } catch (_) {
+      // L'erreur est affichée sur la page avec une action de nouvelle tentative.
+    }
+  }
+
+  void _onPageChanged(int index) {
+    setState(() => _currentIndex = index);
+    _loadWatchDates();
+    _loadCurrentSeason();
   }
 
   void _showWatchHistoryDialog(Episode ep) {
@@ -363,13 +444,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     );
   }
 
-  Episode get _current => widget.episodes[_currentIndex];
+  Episode get _current => _episodes[_currentIndex];
 
   bool get _isWatched =>
       _watchedLocal['${_current.seasonNumber}_${_current.episodeNumber}'] ??
       false;
 
-  bool get _isReleased => widget.isReleasedCheck(_current);
+  bool get _isReleased =>
+      _isAvailable(_current) && widget.isReleasedCheck(_current);
 
   String _episodeRef(Episode ep) =>
       'S${ep.seasonNumber.toString().padLeft(2, '0')} | E${ep.episodeNumber.toString().padLeft(2, '0')}';
@@ -405,11 +487,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         seasonNumbers: seasonNumbers,
         initialSeason: _current.seasonNumber,
         currentEpisode: _current,
-        episodes: widget.episodes,
+        episodes: _episodes,
         watchedLocal: _watchedLocal,
         onEpisodeTap: (ep) {
           Navigator.pop(sheetCtx);
-          final targetIndex = widget.episodes.indexOf(ep);
+          final targetIndex = _episodes.indexWhere(
+            (item) => item.watchKey == ep.watchKey,
+          );
           if (targetIndex >= 0) _goTo(targetIndex);
         },
       ),
@@ -417,7 +501,32 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   Widget _buildEpisodeContent(BuildContext context, int index) {
-    final ep = widget.episodes[index];
+    final ep = _episodes[index];
+    if (!_isAvailable(ep)) {
+      final error = _seasonErrors[ep.seasonNumber];
+      return Center(
+        child: _unloadedSeasons.contains(ep.seasonNumber) && error == null
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    error == null
+                        ? 'Informations de cet épisode indisponibles.'
+                        : 'Impossible de charger cette saison : $error',
+                  ),
+                  if (error != null)
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _seasonErrors.remove(ep.seasonNumber));
+                        _loadCurrentSeason();
+                      },
+                      child: const Text('Réessayer'),
+                    ),
+                ],
+              ),
+      );
+    }
     final k = '${ep.seasonNumber}_${ep.episodeNumber}';
     final isWatched = _watchedLocal[k] ?? false;
     final isReleased = widget.isReleasedCheck(ep);
@@ -620,7 +729,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 controller: _pageController,
                 itemCount: widget.episodes.length,
                 physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (index) => setState(() => _currentIndex = index),
+                onPageChanged: _onPageChanged,
                 itemBuilder: _buildEpisodeContent,
               ),
             ),
@@ -661,6 +770,12 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
     _shownSeason = widget.initialSeason;
   }
 
+  void _showSeason(int season) {
+    setState(() {
+      _shownSeason = season;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final seasonIdx = widget.seasonNumbers.indexOf(_shownSeason);
@@ -696,10 +811,7 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
             children: [
               IconButton(
                 onPressed: hasPrev
-                    ? () => setState(
-                        () =>
-                            _shownSeason = widget.seasonNumbers[seasonIdx - 1],
-                      )
+                    ? () => _showSeason(widget.seasonNumbers[seasonIdx - 1])
                     : null,
                 icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
               ),
@@ -723,10 +835,7 @@ class _SeasonSheetContentState extends State<_SeasonSheetContent> {
               ),
               IconButton(
                 onPressed: hasNext
-                    ? () => setState(
-                        () =>
-                            _shownSeason = widget.seasonNumbers[seasonIdx + 1],
-                      )
+                    ? () => _showSeason(widget.seasonNumbers[seasonIdx + 1])
                     : null,
                 icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
               ),

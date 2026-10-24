@@ -33,10 +33,7 @@ void main() {
             }
             return http.Response(
               jsonEncode({
-                'data': {
-                  'seasons': <dynamic>[],
-                  'episodes': <dynamic>[],
-                },
+                'data': {'seasons': <dynamic>[], 'episodes': <dynamic>[]},
               }),
               200,
             );
@@ -59,5 +56,42 @@ void main() {
         );
       },
     );
+  });
+
+  group('TvdbApiClient Authorization', () {
+    test('envoie le jeton Bearer et se reconnecte une fois sur 401', () async {
+      var logins = 0;
+      final authHeaders = <String?>[];
+      final client = TvdbApiClient(
+        apiKey: 'test-key',
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/login')) {
+            logins++;
+            return http.Response(
+              jsonEncode({
+                'data': {'token': 'tok-$logins'},
+              }),
+              200,
+            );
+          }
+          authHeaders.add(request.headers['Authorization']);
+          if (request.headers['Authorization'] == 'Bearer tok-1') {
+            return http.Response('{"message":"Unauthorized"}', 401);
+          }
+          return http.Response(
+            jsonEncode({
+              'data': {'seasons': <dynamic>[], 'episodes': <dynamic>[]},
+            }),
+            200,
+          );
+        }),
+      );
+
+      await client.getSeasonsWithCounts(1);
+
+      expect(logins, 2);
+      expect(authHeaders.take(2), ['Bearer tok-1', 'Bearer tok-2']);
+      expect(authHeaders.skip(2), everyElement('Bearer tok-2'));
+    });
   });
 }
