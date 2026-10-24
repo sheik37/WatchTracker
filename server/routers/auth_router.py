@@ -240,8 +240,8 @@ async def auth_login(payload: AuthLoginIn, request: Request) -> AuthTokenOut:
 @router.post("/auth/refresh", response_model=AuthTokenOut)
 async def auth_refresh(payload: AuthRefreshIn, request: Request) -> AuthTokenOut:
     ip = auth_service._client_ip(request)
-    retry_after, reset_epoch = await rate_limit_service.auth_rate_limiter.get_retry_after(
-        "refresh", ip
+    retry_after, reset_epoch = (
+        await rate_limit_service.auth_rate_limiter.get_retry_after("refresh", ip)
     )
     if retry_after > 0:
         raise HTTPException(
@@ -251,10 +251,12 @@ async def auth_refresh(payload: AuthRefreshIn, request: Request) -> AuthTokenOut
                 retry_after_seconds=retry_after, reset_epoch_seconds=reset_epoch
             ),
         )
-    token = await run_in_threadpool(auth_crud.rotate_refresh_token, payload.refresh_token)
+    token = await run_in_threadpool(
+        auth_crud.rotate_refresh_token, payload.refresh_token
+    )
     if token is None:
-        _, _, blocked_until, _, _ = await rate_limit_service.auth_rate_limiter.register_failure(
-            "refresh", ip
+        _, _, blocked_until, _, _ = (
+            await rate_limit_service.auth_rate_limiter.register_failure("refresh", ip)
         )
         raise HTTPException(
             status_code=401,
@@ -279,7 +281,9 @@ def auth_verify_email(token: str = Query(min_length=20)) -> dict[str, str]:
     raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
 
-@router.post("/auth/resend-verification", response_model=AuthRegisterOut, status_code=202)
+@router.post(
+    "/auth/resend-verification", response_model=AuthRegisterOut, status_code=202
+)
 async def auth_resend_verification(
     payload: AuthResendVerificationIn, request: Request
 ) -> AuthRegisterOut:

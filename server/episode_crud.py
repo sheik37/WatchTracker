@@ -202,8 +202,7 @@ def _set_episodes_watched_batch(
         INSERT INTO episode_watch_events (
             user_id, media_id, season_number, episode_number, watched_at, created_at
         )
-        VALUES """
-        + event_values_sql,
+        VALUES """ + event_values_sql,
         tuple(event_params),
     )
 

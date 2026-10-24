@@ -160,4 +160,6 @@ def remove_episode_progress(
     episode_number: int,
     user_id: int = Depends(get_current_user_id),
 ) -> None:
-    episode_crud.delete_episode_progress(user_id, media_id, season_number, episode_number)
+    episode_crud.delete_episode_progress(
+        user_id, media_id, season_number, episode_number
+    )

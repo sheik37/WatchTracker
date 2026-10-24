@@ -111,10 +111,14 @@ def test_watchlist_endpoints(monkeypatch):
         lambda user_id, item: {"id": item.id, "title": item.title},
     )
     monkeypatch.setattr(
-        watchlist_router.watchlist_crud, "update_watch_status", lambda *args: {"ok": True}
+        watchlist_router.watchlist_crud,
+        "update_watch_status",
+        lambda *args: {"ok": True},
     )
     monkeypatch.setattr(
-        watchlist_router.watchlist_crud, "update_watch_total", lambda *args: {"ok": True}
+        watchlist_router.watchlist_crud,
+        "update_watch_total",
+        lambda *args: {"ok": True},
     )
     monkeypatch.setattr(
         watchlist_router.watchlist_crud, "delete_watchlist", lambda *args: None
@@ -391,10 +395,14 @@ def test_auth_register(monkeypatch):
         lambda email, password: {"user_id": 1, "email": email, "created_new": True},
     )
     monkeypatch.setattr(
-        auth_router.auth_crud, "create_email_verification_token", lambda user_id: "verify-token"
+        auth_router.auth_crud,
+        "create_email_verification_token",
+        lambda user_id: "verify-token",
     )
     monkeypatch.setattr(
-        auth_router.email_service, "_send_verification_email", lambda email, verify_link: None
+        auth_router.email_service,
+        "_send_verification_email",
+        lambda email, verify_link: None,
     )
     response = client.post(
         "/auth/register", json={"email": "alex@example.com", "password": "password123"}
@@ -422,7 +430,9 @@ def test_auth_register_email_limit_reached(monkeypatch):
         lambda email, password: {"user_id": 1, "email": email, "created_new": True},
     )
     monkeypatch.setattr(
-        auth_router.auth_crud, "create_email_verification_token", lambda user_id: "verify-token"
+        auth_router.auth_crud,
+        "create_email_verification_token",
+        lambda user_id: "verify-token",
     )
     monkeypatch.setattr(
         auth_router.email_service,
@@ -431,7 +441,9 @@ def test_auth_register_email_limit_reached(monkeypatch):
             RuntimeError("email_daily_limit_reached")
         ),
     )
-    monkeypatch.setattr(auth_router.auth_crud, "delete_user_by_id", lambda user_id: None)
+    monkeypatch.setattr(
+        auth_router.auth_crud, "delete_user_by_id", lambda user_id: None
+    )
     response = client.post(
         "/auth/register", json={"email": "alex@example.com", "password": "password123"}
     )
@@ -566,7 +578,9 @@ def test_auth_resend_verification_neutral_response(monkeypatch):
 
 def test_auth_forgot_password_neutral_response(monkeypatch):
     monkeypatch.setattr(
-        auth_router.auth_crud, "create_password_reset_token_for_email", lambda email: None
+        auth_router.auth_crud,
+        "create_password_reset_token_for_email",
+        lambda email: None,
     )
     response = client.post("/auth/forgot-password", json={"email": "alex@example.com"})
     assert response.status_code == 202

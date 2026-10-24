@@ -14,7 +14,6 @@ import auth_crud
 import episode_crud
 from schemas import EpisodeProgressItemIn
 
-
 # ---------------------------------------------------------------------------
 # replace_episode_progress / rewatch_episode_season : requêtes SQL groupées
 # (optimisation étape 4, remplace la boucle "une requête par épisode").
@@ -39,7 +38,10 @@ class _EpisodeBatchCursor:
         return None
 
     def fetchall(self):
-        if "SELECT season_number, episode_number, is_watched, updated_at" in self._last_sql:
+        if (
+            "SELECT season_number, episode_number, is_watched, updated_at"
+            in self._last_sql
+        ):
             return self._existing_rows
         return []
 
@@ -77,15 +79,21 @@ def test_replace_episode_progress_noop_without_db_access_when_no_items(monkeypat
 def test_replace_episode_progress_last_write_wins_on_duplicate_keys(monkeypatch):
     calls: list[tuple[str, list]] = []
 
-    def fake_watched_batch(cur, *, user_id, media_id, keys, allow_rewatch, watched_at=None):
+    def fake_watched_batch(
+        cur, *, user_id, media_id, keys, allow_rewatch, watched_at=None
+    ):
         calls.append(("watched", list(keys)))
 
     def fake_unwatched_batch(cur, *, user_id, media_id, keys):
         calls.append(("unwatched", list(keys)))
 
     monkeypatch.setattr(episode_crud, "_set_episodes_watched_batch", fake_watched_batch)
-    monkeypatch.setattr(episode_crud, "_set_episodes_unwatched_batch", fake_unwatched_batch)
-    monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(object()))
+    monkeypatch.setattr(
+        episode_crud, "_set_episodes_unwatched_batch", fake_unwatched_batch
+    )
+    monkeypatch.setattr(
+        episode_crud, "cursor", lambda: contextlib.nullcontext(object())
+    )
 
     items = [
         EpisodeProgressItemIn(season_number=1, episode_number=1, is_watched=True),
@@ -102,12 +110,22 @@ def test_rewatch_episode_season_dedupes_sorts_and_batches_single_call(monkeypatc
     calls: list[list[tuple[int, int]]] = []
 
     def fake_set_watched_batch(
-        cur, *, user_id, media_id, keys, allow_rewatch, watched_at=None,
+        cur,
+        *,
+        user_id,
+        media_id,
+        keys,
+        allow_rewatch,
+        watched_at=None,
     ):
         calls.append(list(keys))
 
-    monkeypatch.setattr(episode_crud, "_set_episodes_watched_batch", fake_set_watched_batch)
-    monkeypatch.setattr(episode_crud, "cursor", lambda: contextlib.nullcontext(object()))
+    monkeypatch.setattr(
+        episode_crud, "_set_episodes_watched_batch", fake_set_watched_batch
+    )
+    monkeypatch.setattr(
+        episode_crud, "cursor", lambda: contextlib.nullcontext(object())
+    )
 
     episode_crud.rewatch_episode_season(
         user_id=1, media_id=5, season_number=2, episode_numbers=[3, 1, 3, 0, 2]
@@ -219,28 +237,34 @@ def test_reset_password_with_token_rejects_reused_password(monkeypatch):
     cur = _ResetPasswordCursor({"user_id": 3, "password_hash": "irrelevant"})
     monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
     monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: False)
-    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: True
+    monkeypatch.setattr(
+        auth_crud, "_is_password_reused", lambda cur, user_id, password: True
     )
 
-    assert auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!") == "password_reused"
+    assert (
+        auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
+        == "password_reused"
+    )
 
 
 def test_reset_password_with_token_updates_and_revokes_sessions(monkeypatch):
     cur = _ResetPasswordCursor({"user_id": 3, "password_hash": "irrelevant"})
     monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
     monkeypatch.setattr(auth_crud, "_verify_password", lambda password, encoded: False)
-    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: False
+    monkeypatch.setattr(
+        auth_crud, "_is_password_reused", lambda cur, user_id, password: False
     )
     revoked: list[int] = []
-    monkeypatch.setattr(auth_crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
+    monkeypatch.setattr(
+        auth_crud,
+        "revoke_all_user_sessions",
+        lambda cur, user_id: revoked.append(user_id),
     )
 
     result = auth_crud.reset_password_with_token("tok", "Str0ngPassw0rd!")
     assert result == "updated"
     assert revoked == [3]
-    assert any(
-        "UPDATE users" in sql and "password_hash" in sql for sql in cur.executed
-    )
+    assert any("UPDATE users" in sql and "password_hash" in sql for sql in cur.executed)
     assert any("UPDATE password_reset_tokens" in sql for sql in cur.executed)
     assert any("INSERT INTO password_history" in sql for sql in cur.executed)
 
@@ -288,10 +312,14 @@ def test_change_password_for_user_updates_and_revokes_sessions(monkeypatch):
         return password == "current-pw-Str0ng!"
 
     monkeypatch.setattr(auth_crud, "_verify_password", fake_verify)
-    monkeypatch.setattr(auth_crud, "_is_password_reused", lambda cur, user_id, password: False
+    monkeypatch.setattr(
+        auth_crud, "_is_password_reused", lambda cur, user_id, password: False
     )
     revoked: list[int] = []
-    monkeypatch.setattr(auth_crud, "revoke_all_user_sessions", lambda cur, user_id: revoked.append(user_id)
+    monkeypatch.setattr(
+        auth_crud,
+        "revoke_all_user_sessions",
+        lambda cur, user_id: revoked.append(user_id),
     )
 
     result = auth_crud.change_password_for_user(
@@ -331,20 +359,22 @@ def test_get_user_id_from_token_updates_last_used_at_when_missing(monkeypatch):
 
     assert auth_crud.get_user_id_from_token("tok") == 42
     update_calls = [
-        sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
+        sql
+        for sql in cur.executed
+        if "UPDATE auth_tokens" in sql and "last_used_at" in sql
     ]
     assert len(update_calls) == 1
 
 
 def test_get_user_id_from_token_skips_update_when_recently_used(monkeypatch):
-    cur = _AuthTokenCursor(
-        {"user_id": 42, "last_used_at": datetime.now(timezone.utc)}
-    )
+    cur = _AuthTokenCursor({"user_id": 42, "last_used_at": datetime.now(timezone.utc)})
     monkeypatch.setattr(auth_crud, "cursor", lambda: contextlib.nullcontext(cur))
 
     assert auth_crud.get_user_id_from_token("tok") == 42
     update_calls = [
-        sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
+        sql
+        for sql in cur.executed
+        if "UPDATE auth_tokens" in sql and "last_used_at" in sql
     ]
     # Optimisation : pas d'écriture si last_used_at date de moins de 5 min.
     assert update_calls == []
@@ -358,7 +388,9 @@ def test_get_user_id_from_token_updates_when_last_used_is_old(monkeypatch):
 
     assert auth_crud.get_user_id_from_token("tok") == 42
     update_calls = [
-        sql for sql in cur.executed if "UPDATE auth_tokens" in sql and "last_used_at" in sql
+        sql
+        for sql in cur.executed
+        if "UPDATE auth_tokens" in sql and "last_used_at" in sql
     ]
     assert len(update_calls) == 1
 

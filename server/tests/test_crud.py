@@ -43,4 +43,3 @@ class _FakeCursor:
 
     def fetchall(self):
         return self._fetchall_result
-
