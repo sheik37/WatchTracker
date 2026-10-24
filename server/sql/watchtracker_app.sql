@@ -1,7 +1,8 @@
 -- Mot de passe du role applicatif : NE JAMAIS committer de vraie valeur ici.
 -- Ce script attend une variable psql "app_password" definie AVANT execution,
 -- par exemple :
---   psql -v app_password="'<mot_de_passe_reel>'" -f watchtracker_app.sql
+--   psql -v app_password='<mot_de_passe_reel>' -f watchtracker_app.sql
+-- (valeur brute, sans guillemets supplementaires : psql les ajoute lui-meme)
 -- La vraie valeur doit provenir d'un secret/variable d'environnement injecte
 -- au moment du deploiement (ex: fichier .env/.secrets reel sur le NAS), et ne
 -- doit jamais etre ecrite en clair dans ce depot. Si "app_password" n'est pas
@@ -10,16 +11,15 @@
 \set ON_ERROR_STOP on
 \if :{?app_password}
 \else
-    \warn 'Variable psql "app_password" non definie. Relancez avec : psql -v app_password="''<mot_de_passe_reel>''" -f watchtracker_app.sql'
+    \warn 'Variable psql "app_password" non definie. Relancez avec : psql -v app_password=''<mot_de_passe_reel>'' -f watchtracker_app.sql'
     \quit
 \endif
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'watchtracker_app') THEN
-        CREATE ROLE watchtracker_app LOGIN PASSWORD :'app_password';
-    END IF;
-END $$;
+-- :'app_password' n'est pas substitue dans un bloc DO $$...$$ : on genere donc
+-- la commande avec SELECT puis on l'execute avec \gexec.
+SELECT format('CREATE ROLE watchtracker_app LOGIN PASSWORD %L', :'app_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'watchtracker_app')
+\gexec
 
 GRANT CONNECT ON DATABASE watchtracker TO watchtracker_app;
 GRANT USAGE ON SCHEMA public TO watchtracker_app;
