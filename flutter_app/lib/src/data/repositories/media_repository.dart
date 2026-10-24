@@ -31,8 +31,34 @@ class MediaRepository {
   late final MetadataCache _metadataCache;
   late final OfflineSyncQueue _syncQueue;
   final Map<int, int?> _tvdbIdCache = {};
-  final Map<String, List<Episode>> _seasonEpisodesCache = {};
+
+  /// Cache mémoire LRU (borné à [_maxSeasonEpisodesCacheEntries] entrées)
+  /// des épisodes déjà récupérés par saison, pour éviter que l'app ne
+  /// garde indéfiniment en mémoire toutes les saisons consultées pendant
+  /// sa durée de vie.
+  static const int _maxSeasonEpisodesCacheEntries = 20;
+  final Map<String, List<Episode>> _seasonEpisodesCache =
+      <String, List<Episode>>{};
   final Map<String, Future<List<Episode>>> _seasonEpisodesInFlight = {};
+
+  /// Récupère une entrée du cache LRU et la marque comme récemment utilisée.
+  List<Episode>? _getSeasonEpisodesFromCache(String key) {
+    final cached = _seasonEpisodesCache.remove(key);
+    if (cached == null) return null;
+    _seasonEpisodesCache[key] = cached;
+    return cached;
+  }
+
+  /// Insère/actualise une entrée du cache LRU et évince la plus ancienne
+  /// entrée si la taille max est dépassée.
+  void _putSeasonEpisodesInCache(String key, List<Episode> episodes) {
+    _seasonEpisodesCache.remove(key);
+    _seasonEpisodesCache[key] = episodes;
+    while (_seasonEpisodesCache.length > _maxSeasonEpisodesCacheEntries) {
+      _seasonEpisodesCache.remove(_seasonEpisodesCache.keys.first);
+    }
+  }
+
   final ValueNotifier<int> watchlistVersion = ValueNotifier<int>(0);
 
   // Tracks if last fetch was from cache
@@ -442,49 +468,52 @@ class MediaRepository {
     await updateWatchStatus(media, category, WatchStatus.notWatched);
   }
 
-  Future<MediaDetails> getMovieDetails(int id) async {
+  /// Factorise le schéma commun "essayer le réseau, sauver en cache, et si
+  /// ça échoue retomber sur le cache" partagé par [getMovieDetails] et
+  /// [getTvDetailsFast]. Met aussi à jour [lastFetchWasFromCache].
+  Future<MediaDetails> _fetchWithMetadataFallback({
+    required Future<MediaDetails> Function() fetchFromNetwork,
+    required String mediaType,
+    required int mediaId,
+    Future<MediaDetails> Function(MediaMetadataRow cached)? fromCachedRow,
+  }) async {
     _lastFetchWasFromCache = false;
 
     try {
-      // Try to fetch from API
-      final details = await _tmdbApi.getMovieDetails(id);
-      // Save to cache
-      await _metadataCache.saveMediaMetadata(
-        id,
-        MediaType.movie.value,
-        details,
-      );
+      final details = await fetchFromNetwork();
+      await _metadataCache.saveMediaMetadata(mediaId, mediaType, details);
       return details;
     } catch (e) {
-      // Try cache as fallback
-      final cached = await _metadataCache.getMediaMetadata(
-        id,
-        MediaType.movie.value,
-      );
+      final cached = await _metadataCache.getMediaMetadata(mediaId, mediaType);
       if (cached != null) {
         _lastFetchWasFromCache = true;
+        if (fromCachedRow != null) return fromCachedRow(cached);
         return _movieMetadataRowToDetails(cached);
       }
       rethrow;
     }
   }
 
-  Future<MediaDetails> getTvDetailsFast(int id) async {
-    _lastFetchWasFromCache = false;
+  Future<MediaDetails> getMovieDetails(int id) {
+    return _fetchWithMetadataFallback(
+      fetchFromNetwork: () => _tmdbApi.getMovieDetails(id),
+      mediaType: MediaType.movie.value,
+      mediaId: id,
+    );
+  }
 
-    try {
-      final details = await _tmdbApi.getTvDetails(id);
-      await _metadataCache.saveMediaMetadata(id, MediaType.tv.value, details);
-      return details;
-    } catch (e) {
-      final cached = await _metadataCache.getMediaMetadata(
-        id,
-        MediaType.tv.value,
-      );
-      if (cached != null) {
-        _lastFetchWasFromCache = true;
+  Future<MediaDetails> getTvDetailsFast(int id) {
+    return _fetchWithMetadataFallback(
+      fetchFromNetwork: () async {
+        final details = await _tmdbApi.getTvDetails(id);
+        await _saveProviderSeasons(id, 'tmdb', details.seasons);
+        return details;
+      },
+      mediaType: MediaType.tv.value,
+      mediaId: id,
+      fromCachedRow: (cached) async {
         final base = _movieMetadataRowToDetails(cached);
-        final cachedSeasons = await _metadataCache.getSeasonMetadata(id);
+        final cachedSeasons = await _loadProviderSeasons(id, 'tmdb');
         if (cachedSeasons.isEmpty) {
           return base;
         }
@@ -499,11 +528,10 @@ class MediaRepository {
           mediaType: base.mediaType,
           tvStatus: base.tvStatus,
           genres: base.genres,
-          seasons: _seasonRowsToSeasons(cachedSeasons),
+          seasons: cachedSeasons,
         );
-      }
-      rethrow;
-    }
+      },
+    );
   }
 
   Future<int?> _getTvdbId(int tmdbId) async {
@@ -514,119 +542,283 @@ class MediaRepository {
       return null;
     }
     final id = await _tmdbApi.getTvdbId(tmdbId);
-    _tvdbIdCache[tmdbId] = id;
+    if (id != null) _tvdbIdCache[tmdbId] = id;
     return id;
+  }
+
+  Future<void> _saveProviderSeasons(
+    int id,
+    String source,
+    List<Season> seasons,
+  ) => _metadataCache.saveProviderSnapshot(id, '$source-seasons', -1, [
+    for (final season in seasons)
+      {
+        'id': season.id,
+        'name': season.name,
+        'season_number': season.seasonNumber,
+        'episode_count': season.episodeCount,
+      },
+  ]);
+
+  Future<List<Season>> _loadProviderSeasons(int id, String source) async {
+    final rows = await _metadataCache.getProviderSnapshot(
+      id,
+      '$source-seasons',
+      -1,
+    );
+    return [
+      for (final row in rows ?? <Map<String, dynamic>>[])
+        Season(
+          id: row['id'] as int,
+          name: row['name'] as String,
+          seasonNumber: row['season_number'] as int,
+          episodeCount: row['episode_count'] as int,
+        ),
+    ];
+  }
+
+  Future<List<Season>> _animeSeasons(int id) async {
+    try {
+      final tvdb = _tvdbClient;
+      if (tvdb == null) throw StateError('TVDB non configuré');
+      final tvdbId = await _getTvdbId(id);
+      if (tvdbId == null) throw StateError('Association TMDB/TVDB absente');
+      final seasons = await tvdb.getSeasonsWithCounts(tvdbId);
+      if (seasons.isEmpty) throw StateError('Découpage TVDB vide');
+      await _saveProviderSeasons(id, 'tvdb', seasons);
+      return seasons;
+    } catch (error) {
+      final cached = await _loadProviderSeasons(id, 'tvdb');
+      debugPrint(
+        'MediaRepository: découpage TVDB $id indisponible: $error; '
+        'repli ${cached.isEmpty ? "TMDB" : "cache TVDB"}',
+      );
+      if (cached.isNotEmpty) _lastFetchWasFromCache = true;
+      return cached;
+    }
   }
 
   Future<MediaDetails> getTvDetails(int id) async {
     final details = await getTvDetailsFast(id);
-    if (details.watchCategory() != WatchCategory.anime) {
-      if (details.seasons.isNotEmpty) {
-        await _metadataCache.saveSeasonMetadata(id, details.seasons);
-      }
-      return details;
-    }
-    final tvdb = _tvdbClient;
-    if (tvdb == null) {
-      if (details.seasons.isNotEmpty) {
-        await _metadataCache.saveSeasonMetadata(id, details.seasons);
-      }
-      return details;
-    }
-    try {
-      final tvdbId = await _getTvdbId(id);
-      if (tvdbId == null) {
-        if (details.seasons.isNotEmpty) {
-          await _metadataCache.saveSeasonMetadata(id, details.seasons);
-        }
-        return details;
-      }
-      final seasons = await tvdb.getSeasonsWithCounts(tvdbId);
-      if (seasons.isEmpty) {
-        if (details.seasons.isNotEmpty) {
-          await _metadataCache.saveSeasonMetadata(id, details.seasons);
-        }
-        return details;
-      }
-      final result = MediaDetails(
-        id: details.id,
-        title: details.title,
-        overview: details.overview,
-        posterPath: details.posterPath,
-        backdropPath: details.backdropPath,
-        releaseDate: details.releaseDate,
-        voteAverage: details.voteAverage,
-        mediaType: details.mediaType,
-        tvStatus: details.tvStatus,
-        genres: details.genres,
-        seasons: seasons,
-      );
-      // Save seasons to cache
-      await _metadataCache.saveSeasonMetadata(id, seasons);
-      return result;
-    } catch (_) {
-      if (details.seasons.isNotEmpty) {
-        await _metadataCache.saveSeasonMetadata(id, details.seasons);
-      }
-      return details;
-    }
+    if (details.watchCategory() != WatchCategory.anime) return details;
+    final seasons = await _animeSeasons(id);
+    if (seasons.isEmpty) return details;
+    return MediaDetails(
+      id: details.id,
+      title: details.title,
+      overview: details.overview,
+      posterPath: details.posterPath,
+      backdropPath: details.backdropPath,
+      releaseDate: details.releaseDate,
+      voteAverage: details.voteAverage,
+      mediaType: details.mediaType,
+      tvStatus: details.tvStatus,
+      genres: details.genres,
+      seasons: seasons,
+    );
   }
 
   Future<List<Episode>> getSeasonEpisodes(int tvId, int seasonNumber) async {
-    final cacheKey = '${tvId}_$seasonNumber';
-    final cached = _seasonEpisodesCache[cacheKey];
+    // Only coalesce the final operation. Raw provider entries are cached below,
+    // so a fallback or missing TMDB slot cannot poison a later mapping.
+    final cacheKey = 'mapped_${tvId}_$seasonNumber';
+    final pending = _seasonEpisodesInFlight[cacheKey];
+    if (pending != null) return pending;
+    final future = _resolveSeasonEpisodes(tvId, seasonNumber);
+    _seasonEpisodesInFlight[cacheKey] = future;
+    try {
+      return await future;
+    } finally {
+      _seasonEpisodesInFlight.remove(cacheKey);
+    }
+  }
+
+  Future<List<Episode>> _resolveSeasonEpisodes(int id, int number) async {
+    final cached = await _metadataCache.getMediaMetadata(id, 'tv');
+    // Without a TVDB client or cached anime metadata, TMDB is the sole source.
+    if (cached == null && _tvdbClient == null) {
+      return _providerEpisodes(id, number, 'tmdb');
+    }
+    final details = cached == null
+        ? await getTvDetailsFast(id)
+        : _movieMetadataRowToDetails(cached);
+    if (details.watchCategory() != WatchCategory.anime) {
+      return _providerEpisodes(id, number, 'tmdb');
+    }
+    var tvdbSeasons = await _loadProviderSeasons(id, 'tvdb');
+    if (tvdbSeasons.isEmpty) tvdbSeasons = await _animeSeasons(id);
+    if (tvdbSeasons.isEmpty) return _providerEpisodes(id, number, 'tmdb');
+    final season = tvdbSeasons
+        .where((s) => s.seasonNumber == number)
+        .firstOrNull;
+    if (season == null) return [];
+    List<Episode> slots;
+    try {
+      slots = await _providerEpisodes(id, number, 'tvdb');
+    } catch (error) {
+      debugPrint(
+        'MediaRepository: numéros TVDB $id/$number indisponibles: '
+        '$error; repli sur le découpage TVDB en cache',
+      );
+      slots = [];
+    }
+    if (slots.isEmpty) {
+      slots = [
+        for (var n = 1; n <= season.episodeCount; n++)
+          Episode(
+            id: 0,
+            name: '',
+            overview: '',
+            episodeNumber: n,
+            seasonNumber: number,
+            stillPath: null,
+          ),
+      ];
+    }
+    var tmdbSeasons = await _loadProviderSeasons(id, 'tmdb');
+    if (tmdbSeasons.isEmpty) {
+      try {
+        tmdbSeasons = (await getTvDetailsFast(id)).seasons;
+      } catch (error) {
+        debugPrint('MediaRepository: découpage TMDB $id indisponible: $error');
+      }
+    }
+    tmdbSeasons = [...tmdbSeasons]
+      ..sort((a, b) => a.seasonNumber.compareTo(b.seasonNumber));
+    final offset = number == 0
+        ? 0
+        : tvdbSeasons
+              .where((s) => s.seasonNumber > 0 && s.seasonNumber < number)
+              .fold<int>(0, (sum, s) => sum + s.episodeCount);
+    final positions = <int, Episode>{};
+    var start = 0;
+    for (final tmdbSeason in tmdbSeasons) {
+      if ((tmdbSeason.seasonNumber == 0) != (number == 0)) continue;
+      final end = start + tmdbSeason.episodeCount;
+      final intersects = slots.any((slot) {
+        final position = offset + slot.episodeNumber - 1;
+        return position >= start && position < end;
+      });
+      if (intersects) {
+        try {
+          final episodes = await _providerEpisodes(
+            id,
+            tmdbSeason.seasonNumber,
+            'tmdb',
+          );
+          for (final episode in episodes) {
+            // Number-based positions, never compact a missing TMDB episode.
+            if (episode.episodeNumber > 0 &&
+                episode.episodeNumber <= tmdbSeason.episodeCount) {
+              positions[start + episode.episodeNumber - 1] = episode;
+            }
+          }
+        } catch (error) {
+          debugPrint(
+            'MediaRepository: épisodes TMDB $id/'
+            '${tmdbSeason.seasonNumber} indisponibles: $error',
+          );
+        }
+      }
+      start = end;
+    }
+    final result = <Episode>[];
+    for (final slot in slots) {
+      final info = positions[offset + slot.episodeNumber - 1];
+      if (info == null) {
+        debugPrint(
+          'MediaRepository: association TMDB absente pour '
+          '$id TVDB S${number}E${slot.episodeNumber}',
+        );
+      }
+      result.add(
+        Episode(
+          id: slot.id,
+          name:
+              info?.name ??
+              'Épisode ${slot.episodeNumber} — informations TMDB indisponibles',
+          overview: info?.overview ?? '',
+          episodeNumber: slot.episodeNumber,
+          seasonNumber: number,
+          stillPath: info?.stillPath,
+          airDate: info?.airDate,
+          runtime: info?.runtime,
+        ),
+      );
+    }
+    return result;
+  }
+
+  Future<List<Episode>> _providerEpisodes(
+    int tvId,
+    int seasonNumber,
+    String source,
+  ) async {
+    final cacheKey = '${source}_${tvId}_$seasonNumber';
+    final cached = _getSeasonEpisodesFromCache(cacheKey);
     if (cached != null) return cached;
     final inFlight = _seasonEpisodesInFlight[cacheKey];
     if (inFlight != null) return inFlight;
 
-    final tvdb = _tvdbClient;
     final future = (() async {
-      List<Episode> episodes;
-      if (tvdb != null) {
-        final tvdbId = _tvdbIdCache[tvId];
-        if (tvdbId != null) {
-          try {
-            episodes = await tvdb.getSeasonEpisodes(tvdbId, seasonNumber);
-            _seasonEpisodesCache[cacheKey] = episodes;
-            // Save to persistent cache
-            await _metadataCache.saveEpisodeMetadata(
-              tvId,
-              seasonNumber,
-              episodes,
-            );
-            return episodes;
-          } catch (_) {}
-        }
-      }
       try {
-        episodes = await _tmdbApi.getSeasonDetails(tvId, seasonNumber);
-        _seasonEpisodesCache[cacheKey] = episodes;
-        // Save to persistent cache
-        await _metadataCache.saveEpisodeMetadata(tvId, seasonNumber, episodes);
+        final List<Episode> episodes;
+        if (source == 'tvdb') {
+          final tvdbId = await _getTvdbId(tvId);
+          if (_tvdbClient == null || tvdbId == null) {
+            throw StateError('TVDB indisponible pour $tvId');
+          }
+          episodes = await _tvdbClient.getSeasonEpisodes(tvdbId, seasonNumber);
+        } else {
+          episodes = await _tmdbApi.getSeasonDetails(tvId, seasonNumber);
+        }
+        await _metadataCache.saveProviderSnapshot(
+          tvId,
+          '$source-episodes',
+          seasonNumber,
+          [
+            for (final ep in episodes)
+              {
+                'id': ep.id,
+                'name': ep.name,
+                'overview': ep.overview,
+                'episode_number': ep.episodeNumber,
+                'season_number': seasonNumber,
+                'still_path': ep.stillPath,
+                'air_date': ep.airDate,
+                'runtime': ep.runtime,
+              },
+          ],
+        );
+        _putSeasonEpisodesInCache(cacheKey, episodes);
         return episodes;
       } catch (e) {
-        // Try to load from persistent cache
-        final cachedEpisodes = await _metadataCache.getEpisodeMetadata(
+        final cachedEpisodes = await _metadataCache.getProviderSnapshot(
           tvId,
+          '$source-episodes',
           seasonNumber,
         );
-        if (cachedEpisodes.isNotEmpty) {
+        debugPrint(
+          'MediaRepository: épisodes $source $tvId/$seasonNumber: '
+          '$e; ${cachedEpisodes == null ? "aucun cache" : "repli cache"}',
+        );
+        if (cachedEpisodes != null) {
           _lastFetchWasFromCache = true;
           final episodes = cachedEpisodes
               .map(
                 (row) => Episode(
-                  id: row.id ?? 0,
-                  name: row.name ?? 'Unknown',
-                  overview: row.overview ?? '',
-                  episodeNumber: row.episodeNumber,
-                  seasonNumber: row.seasonNumber,
-                  stillPath: row.stillPath,
-                  airDate: row.airDate,
-                  runtime: row.runtime,
+                  id: row['id'] as int,
+                  name: row['name'] as String,
+                  overview: row['overview'] as String,
+                  episodeNumber: row['episode_number'] as int,
+                  seasonNumber: row['season_number'] as int,
+                  stillPath: row['still_path'] as String?,
+                  airDate: row['air_date'] as String?,
+                  runtime: row['runtime'] as int?,
                 ),
               )
               .toList();
-          _seasonEpisodesCache[cacheKey] = episodes;
+          _putSeasonEpisodesInCache(cacheKey, episodes);
           return episodes;
         }
         rethrow;
@@ -640,7 +832,18 @@ class MediaRepository {
     }
   }
 
-  Future<void> prefetchSeasonEpisodes(MediaDetails details) async {
+  /// Précharge les épisodes des saisons d'une série.
+  ///
+  /// Par défaut, ne précharge que la saison [currentSeasonNumber] (ou la
+  /// première saison si non précisée) et la suivante, pour éviter de
+  /// lancer un grand nombre d'appels réseau simultanés sur des séries ayant
+  /// beaucoup de saisons. Passez [prefetchAllSeasons] à `true` pour
+  /// retrouver l'ancien comportement qui précharge toutes les saisons.
+  Future<void> prefetchSeasonEpisodes(
+    MediaDetails details, {
+    bool prefetchAllSeasons = false,
+    int? currentSeasonNumber,
+  }) async {
     if (details.mediaType != MediaType.tv) return;
     final seasons =
         details.seasons
@@ -649,15 +852,30 @@ class MediaRepository {
             .toList()
           ..sort();
     if (seasons.isEmpty) return;
+    final seasonsToPrefetch = prefetchAllSeasons
+        ? seasons
+        : _currentAndNextSeason(seasons, currentSeasonNumber);
     await Future.wait(
-      seasons.map((seasonNumber) async {
-        final cacheKey = '${details.id}_$seasonNumber';
-        if (_seasonEpisodesCache.containsKey(cacheKey)) return;
+      seasonsToPrefetch.map((seasonNumber) async {
         try {
           await getSeasonEpisodes(details.id, seasonNumber);
         } catch (_) {}
       }),
     );
+  }
+
+  /// Retourne la saison [currentSeasonNumber] (ou la première saison
+  /// disponible si non précisée) et la saison suivante, parmi
+  /// [sortedSeasonNumbers] (triés par ordre croissant).
+  List<int> _currentAndNextSeason(
+    List<int> sortedSeasonNumbers,
+    int? currentSeasonNumber,
+  ) {
+    final current = currentSeasonNumber ?? sortedSeasonNumbers.first;
+    var index = sortedSeasonNumbers.indexOf(current);
+    if (index == -1) index = 0;
+    final end = (index + 2).clamp(0, sortedSeasonNumbers.length);
+    return sortedSeasonNumbers.sublist(index, end);
   }
 
   Future<List<RemoteEpisodeProgress>> getEpisodeProgress(int mediaId) async {
@@ -1306,19 +1524,6 @@ class MediaRepository {
       genres: row.genres,
       seasons: const <Season>[],
     );
-  }
-
-  List<Season> _seasonRowsToSeasons(List<SeasonMetadataRow> rows) {
-    return rows
-        .map(
-          (row) => Season(
-            id: row.id ?? 0,
-            name: row.name ?? 'Saison ${row.seasonNumber}',
-            seasonNumber: row.seasonNumber,
-            episodeCount: row.episodeCount ?? 0,
-          ),
-        )
-        .toList();
   }
 
   Future<void> cleanupMetadataCache() async {

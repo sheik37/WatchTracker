@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'core/app_config.dart';
 import 'core/app_update_launcher.dart';
 import 'core/app_update_service.dart';
+import 'core/cooldown_controller.dart';
 import 'presentation/theme/app_theme.dart';
 import 'data/local/auth_session_store.dart';
 import 'data/local/watchtracker_database.dart';
@@ -45,10 +46,10 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   bool _showOtpField = false;
   bool _showResendVerification = false;
 
-  int? _retryUntilMillis;
   int? _attemptsRemaining;
-  int? _resendUntilMillis;
-  int? _forgotUntilMillis;
+  final _retryCooldown = CooldownController();
+  final _resendCooldown = CooldownController();
+  final _forgotCooldown = CooldownController();
   bool _startupUpdateCheckStarted = false;
   bool _startupUpdatePromptShown = false;
 
@@ -70,18 +71,21 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
   @override
   void dispose() {
     _appUpdateService.dispose();
+    _retryCooldown.dispose();
+    _resendCooldown.dispose();
+    _forgotCooldown.dispose();
     super.dispose();
   }
 
   void _startRetryCountdown(int seconds) {
     setState(() {
-      _retryUntilMillis = _deadlineAfter(seconds);
+      _retryCooldown.updateDeadline(_deadlineAfter(seconds));
       _attemptsRemaining = null;
     });
   }
 
   void _startForgotCooldown([int seconds = _kForgotCooldown]) {
-    setState(() => _forgotUntilMillis = _deadlineAfter(seconds));
+    setState(() => _forgotCooldown.updateDeadline(_deadlineAfter(seconds)));
   }
 
   int? _deadlineAfter(int seconds) {
@@ -90,11 +94,14 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
         const Duration(seconds: 1).inMilliseconds * seconds;
   }
 
-  int _remainingSeconds(int? untilMillis) {
-    if (untilMillis == null) return 0;
-    final remainingMillis = untilMillis - DateTime.now().millisecondsSinceEpoch;
-    if (remainingMillis <= 0) return 0;
-    return (remainingMillis / 1000).ceil();
+  /// Resets every active auth cooldown and the retry-attempts counter, used
+  /// whenever the auth flow restarts cleanly (successful login, logout, or
+  /// a session refresh failure).
+  void _clearCooldowns() {
+    _retryCooldown.updateDeadline(null);
+    _attemptsRemaining = null;
+    _resendCooldown.updateDeadline(null);
+    _forgotCooldown.updateDeadline(null);
   }
 
   Future<void> _bootstrap() async {
@@ -159,10 +166,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _showResendVerification = false;
           _authError = null;
           _authInfo = null;
-          _retryUntilMillis = null;
-          _attemptsRemaining = null;
-          _resendUntilMillis = null;
-          _forgotUntilMillis = null;
+          _clearCooldowns();
         });
         return;
       }
@@ -325,10 +329,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
         setState(() {
           _showOtpField = false;
           _showResendVerification = false;
-          _retryUntilMillis = null;
-          _attemptsRemaining = null;
-          _resendUntilMillis = null;
-          _forgotUntilMillis = null;
+          _clearCooldowns();
         });
       }
     } on AuthException catch (e) {
@@ -366,7 +367,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _authInfo =
               'Inscription réussie. Vérifie ton email pour activer ton compte.';
           _showResendVerification = true;
-          _resendUntilMillis = _deadlineAfter(_kResendCooldown);
+          _resendCooldown.updateDeadline(_deadlineAfter(_kResendCooldown));
         });
       }
     } on AuthException catch (e) {
@@ -393,7 +394,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       setState(() => _authError = 'Saisis une adresse email valide.');
       return;
     }
-    if (_remainingSeconds(_forgotUntilMillis) > 0) return;
+    if (_forgotCooldown.remainingSeconds > 0) return;
     setState(() {
       _authLoading = true;
       _authError = null;
@@ -404,7 +405,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       if (mounted) {
         setState(() {
           _authInfo = msg;
-          _forgotUntilMillis = _deadlineAfter(_kForgotCooldown);
+          _forgotCooldown.updateDeadline(_deadlineAfter(_kForgotCooldown));
         });
       }
     } on AuthException catch (e) {
@@ -426,7 +427,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       setState(() => _authError = 'Saisis une adresse email valide.');
       return;
     }
-    if (!_showResendVerification || _remainingSeconds(_resendUntilMillis) > 0) {
+    if (!_showResendVerification || _resendCooldown.remainingSeconds > 0) {
       return;
     }
     setState(() {
@@ -439,7 +440,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
       if (mounted) {
         setState(() {
           _authInfo = msg;
-          _resendUntilMillis = _deadlineAfter(_kResendCooldown);
+          _resendCooldown.updateDeadline(_deadlineAfter(_kResendCooldown));
         });
       }
     } on AuthException catch (e) {
@@ -470,10 +471,7 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
           _showResendVerification = false;
           _authError = null;
           _authInfo = null;
-          _retryUntilMillis = null;
-          _attemptsRemaining = null;
-          _resendUntilMillis = null;
-          _forgotUntilMillis = null;
+          _clearCooldowns();
         });
       }
     }
@@ -510,13 +508,13 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                         '${AppConfig.appVersion}+${AppConfig.appBuildNumber}',
                     errorMessage: _authError,
                     infoMessage: _authInfo,
-                    retryUntilMillis: _retryUntilMillis,
+                    retryUntilMillis: _retryCooldown.deadlineMillis,
                     attemptsRemaining: _attemptsRemaining,
                     showResendVerification: _showResendVerification,
                     showOtpCodeField: _showOtpField,
                     admin2faEmail: _kAdminEmail,
-                    resendUntilMillis: _resendUntilMillis,
-                    forgotUntilMillis: _forgotUntilMillis,
+                    resendUntilMillis: _resendCooldown.deadlineMillis,
+                    forgotUntilMillis: _forgotCooldown.deadlineMillis,
                     onLogin: _login,
                     onRegister: _register,
                     onForgotPassword: _forgotPassword,
@@ -525,13 +523,15 @@ class _WatchTrackerAppState extends State<WatchTrackerApp> {
                       _authError = null;
                       _authInfo = null;
                       _attemptsRemaining = null;
-                      _retryUntilMillis = null;
+                      _retryCooldown.updateDeadline(null);
                     }),
                   )
                 : MainShellScreen(
                     repository: _repository,
                     profile: _profile,
                     onLogout: _logout,
+                    appUpdateService: _appUpdateService,
+                    appUpdateLauncher: _appUpdateLauncher,
                     onProfileUpdated: (profile) {
                       _handleProfileUpdated(profile);
                     },

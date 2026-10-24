@@ -134,8 +134,14 @@ CREATE TABLE IF NOT EXISTS movie_watch_events (
 CREATE INDEX IF NOT EXISTS idx_watchlist_category
     ON watchlist (user_id, content_category);
 
+CREATE INDEX IF NOT EXISTS idx_watchlist_user_updated
+    ON watchlist (user_id, updated_at);
+
 CREATE INDEX IF NOT EXISTS idx_episode_progress_media
     ON episode_progress (user_id, media_id);
+
+CREATE INDEX IF NOT EXISTS idx_episode_progress_user_updated
+    ON episode_progress (user_id, updated_at);
 
 CREATE INDEX IF NOT EXISTS idx_watchlist_tombstones_user_deleted
     ON watchlist_tombstones (user_id, deleted_at DESC);

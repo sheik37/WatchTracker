@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_update_launcher.dart';
+import '../../core/app_update_service.dart';
 import '../../data/models/auth_models.dart';
 import '../../data/models/media_models.dart';
 import '../../data/repositories/media_repository.dart';
@@ -14,12 +16,20 @@ class MainShellScreen extends StatefulWidget {
     required this.profile,
     required this.onLogout,
     required this.onProfileUpdated,
+    this.appUpdateService,
+    this.appUpdateLauncher,
   });
 
   final MediaRepository repository;
   final UserProfile? profile;
   final Future<void> Function() onLogout;
   final ValueChanged<UserProfile> onProfileUpdated;
+
+  /// Optional shared update-check service/launcher, forwarded to
+  /// [ProfileScreen] so the whole app reuses a single instance instead of
+  /// each screen creating its own.
+  final AppUpdateService? appUpdateService;
+  final AppUpdateLauncher? appUpdateLauncher;
 
   @override
   State<MainShellScreen> createState() => _MainShellScreenState();
@@ -50,6 +60,8 @@ class _MainShellScreenState extends State<MainShellScreen> {
         profile: widget.profile,
         onLogout: widget.onLogout,
         onProfileUpdated: widget.onProfileUpdated,
+        appUpdateService: widget.appUpdateService,
+        appUpdateLauncher: widget.appUpdateLauncher,
         onSubScreenVisibilityChanged: (isVisible) {
           if (_hideNavigationBar != isVisible) {
             setState(() {

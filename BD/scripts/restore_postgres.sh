@@ -7,18 +7,6 @@ ENV_FILE="$BASE_DIR/.env"
 COMMON_SH_FILE="$COMMON_DIR/common.sh"
 COMMON_SECRETS_FILE="${COMMON_SECRETS_FILE:-$COMMON_DIR/.secrets}"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE"
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-if [ -f "$COMMON_SECRETS_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$COMMON_SECRETS_FILE"
-fi
-
 if [ -f "$COMMON_SH_FILE" ]; then
   # shellcheck disable=SC1090
   . "$COMMON_SH_FILE"
@@ -26,7 +14,18 @@ else
   log_info() { echo "[INFO] $1"; }
   log_error() { echo "[ERROR] $1" >&2; }
   notify_discord() { :; }
+  wt_load_env() {
+    [ -f "$1" ] || { echo "Missing $1" >&2; exit 1; }
+    # shellcheck disable=SC1090
+    . "$1"
+    if [ -n "${2:-}" ] && [ -f "$2" ]; then
+      # shellcheck disable=SC1090
+      . "$2"
+    fi
+  }
 fi
+
+wt_load_env "$ENV_FILE" "$COMMON_SECRETS_FILE"
 
 : "${POSTGRES_USER:?POSTGRES_USER is required in BD/.env}"
 : "${POSTGRES_DB:?POSTGRES_DB is required in BD/.env}"

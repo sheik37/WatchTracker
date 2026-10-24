@@ -20,8 +20,8 @@ flutter_app/ios/Flutter/Flutter.podspec
 flutter_app/ios/Runner.xcworkspace/xcuserdata/
 
 # ─── Python / Server ──────────────────────────────────────────────────────────
-server/__pycache__/
-server/*.pyc
+server/**/__pycache__/
+server/**/*.pyc
 server/.venv/
 server/venv/
 server/.env

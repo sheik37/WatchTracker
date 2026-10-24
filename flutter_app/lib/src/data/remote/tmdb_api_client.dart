@@ -1,16 +1,15 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
 import '../models/details_models.dart';
 import '../models/media_models.dart';
+import 'api_http_client.dart';
 
 class TmdbApiClient {
   TmdbApiClient({required this.apiKey, http.Client? client})
-    : _client = client ?? http.Client();
+    : _http = ApiHttpClient(baseUrl: _baseUrl, client: client);
 
   final String apiKey;
-  final http.Client _client;
+  final ApiHttpClient _http;
 
   static const _baseUrl = 'https://api.themoviedb.org/3';
 
@@ -89,18 +88,15 @@ class TmdbApiClient {
     if (apiKey.isEmpty) {
       throw StateError('TMDB_API_KEY manquant');
     }
-    final uri = Uri.parse('$_baseUrl$path').replace(
+    return _http.getJson(
+      path,
       queryParameters: <String, String>{
         ...params,
         'api_key': apiKey,
         'language': 'fr-FR',
       },
+      errorLabel: 'TMDB',
     );
-    final response = await _client.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('TMDB ${response.statusCode}: ${response.body}');
-    }
-    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   Media _mediaFromJson(Map<String, dynamic> json, {MediaType? forceType}) {

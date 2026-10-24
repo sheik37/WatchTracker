@@ -7,25 +7,24 @@ ENV_FILE="$BASE_DIR/.env"
 COMMON_SH_FILE="$COMMON_DIR/common.sh"
 COMMON_SECRETS_FILE="${COMMON_SECRETS_FILE:-$COMMON_DIR/.secrets}"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE"
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-if [ -f "$COMMON_SECRETS_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$COMMON_SECRETS_FILE"
-fi
-
 if [ -f "$COMMON_SH_FILE" ]; then
   # shellcheck disable=SC1090
   . "$COMMON_SH_FILE"
 else
   log_info() { echo "[INFO] $1"; }
   log_error() { echo "[ERROR] $1" >&2; }
+  wt_load_env() {
+    [ -f "$1" ] || { echo "Missing $1" >&2; exit 1; }
+    # shellcheck disable=SC1090
+    . "$1"
+    if [ -n "${2:-}" ] && [ -f "$2" ]; then
+      # shellcheck disable=SC1090
+      . "$2"
+    fi
+  }
 fi
+
+wt_load_env "$ENV_FILE" "$COMMON_SECRETS_FILE"
 
 : "${POSTGRES_USER:?POSTGRES_USER is required in BD/.env}"
 
@@ -43,7 +42,10 @@ fail() {
 if [ "${1:-}" != "" ]; then
   BACKUP_FILE="$1"
 else
-  BACKUP_FILE="$(ls -1t "$BACKUP_DIR"/watchtracker_*.sql.gz "$BACKUP_DIR"/.watchtracker_*.sql.gz 2>/dev/null | head -n 1 || true)"
+  # Ne matcher que les vrais fichiers de sauvegarde finalises
+  # (watchtracker_*.sql.gz), jamais les fichiers temporaires/caches
+  # (ex: .watchtracker_*) laisses par un backup interrompu.
+  BACKUP_FILE="$(ls -1t "$BACKUP_DIR"/watchtracker_*.sql.gz 2>/dev/null | head -n 1 || true)"
 fi
 
 if [ ! -f "$BACKUP_FILE" ]; then

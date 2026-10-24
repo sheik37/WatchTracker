@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,6 +21,65 @@ class MetadataCache {
   static const String _maxCacheSizePrefsKey = 'cache_max_size_bytes';
 
   int? _runtimeMaxCacheSizeBytes;
+
+  // Separate versioned provider snapshots: legacy season/episode rows have no
+  // trustworthy source and must never be interpreted as TMDB data.
+  Future<Database> _snapshotDatabase() async {
+    final db = await _database.database;
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS provider_metadata_v2(
+        media_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        season_number INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        cached_at INTEGER NOT NULL,
+        last_accessed_at INTEGER NOT NULL,
+        PRIMARY KEY(media_id, source, season_number)
+      )
+    ''');
+    return db;
+  }
+
+  Future<void> saveProviderSnapshot(
+    int mediaId,
+    String source,
+    int seasonNumber,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    final db = await _snapshotDatabase();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert('provider_metadata_v2', {
+      'media_id': mediaId,
+      'source': source,
+      'season_number': seasonNumber,
+      'payload': jsonEncode(rows),
+      'cached_at': now,
+      'last_accessed_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _enforceCacheSizeLimit();
+  }
+
+  Future<List<Map<String, dynamic>>?> getProviderSnapshot(
+    int mediaId,
+    String source,
+    int seasonNumber,
+  ) async {
+    final db = await _snapshotDatabase();
+    final rows = await db.query(
+      'provider_metadata_v2',
+      where: 'media_id = ? AND source = ? AND season_number = ?',
+      whereArgs: [mediaId, source, seasonNumber],
+    );
+    if (rows.isEmpty) return null;
+    await db.update(
+      'provider_metadata_v2',
+      {'last_accessed_at': DateTime.now().millisecondsSinceEpoch},
+      where: 'media_id = ? AND source = ? AND season_number = ?',
+      whereArgs: [mediaId, source, seasonNumber],
+    );
+    return (jsonDecode(rows.single['payload'] as String) as List)
+        .cast<Map<String, dynamic>>();
+  }
 
   /// Sauvegarde les métadonnées d'un média
   Future<void> saveMediaMetadata(
@@ -177,7 +238,7 @@ class MetadataCache {
 
   /// Nettoie le cache en fonction de la stratégie Hybrid (TTL + LRU)
   Future<void> cleanupCache() async {
-    final db = await _database.database;
+    final db = await _snapshotDatabase();
     final now = DateTime.now();
     final expiryThreshold = now.subtract(const Duration(days: cacheTtlDays));
 
@@ -197,6 +258,11 @@ class MetadataCache {
       where: 'cached_at < ?',
       whereArgs: [expiryThreshold.millisecondsSinceEpoch],
     );
+    await db.delete(
+      'provider_metadata_v2',
+      where: 'cached_at < ?',
+      whereArgs: [expiryThreshold.millisecondsSinceEpoch],
+    );
 
     // 2. Vérifier la taille du cache
     final maxCacheSizeBytes = await getMaxCacheSizeBytes();
@@ -209,7 +275,7 @@ class MetadataCache {
 
   /// Calcule la taille totale du cache en bytes
   Future<int> _calculateCacheSize() async {
-    final db = await _database.database;
+    final db = await _snapshotDatabase();
 
     // Estimation basée sur le nombre de lignes * taille moyenne
     final mediaCount = Sqflite.firstIntValue(
@@ -226,10 +292,17 @@ class MetadataCache {
     const mediaSize = 500; // bytes
     const seasonSize = 100; // bytes
     const episodeSize = 200; // bytes
+    final providerSize = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COALESCE(SUM(length(CAST(payload AS BLOB))), 0) '
+        'FROM provider_metadata_v2',
+      ),
+    )!;
 
     return (mediaCount * mediaSize) +
         (seasonCount * seasonSize) +
-        (episodeCount * episodeSize);
+        (episodeCount * episodeSize) +
+        providerSize;
   }
 
   Future<void> _enforceCacheSizeLimit() async {
@@ -242,7 +315,7 @@ class MetadataCache {
 
   /// Supprime les éléments les moins récemment utilisés jusqu'à atteindre la limite
   Future<void> _evictLruItems(int currentSize, int maxCacheSizeBytes) async {
-    final db = await _database.database;
+    final db = await _snapshotDatabase();
     final targetSize = (maxCacheSizeBytes * 0.8)
         .toInt(); // Garder 80% de capacité
     final needToFree = currentSize - targetSize;
@@ -263,6 +336,19 @@ class MetadataCache {
       DELETE FROM episode_metadata 
       WHERE media_id NOT IN (SELECT id FROM media_metadata)
     ''');
+    await db.rawDelete('''
+      DELETE FROM provider_metadata_v2
+      WHERE media_id NOT IN (SELECT id FROM media_metadata)
+    ''');
+    // A single large snapshot must not bypass the configured limit.
+    while (await _calculateCacheSize() > maxCacheSizeBytes) {
+      final removed = await db.rawDelete('''
+        DELETE FROM provider_metadata_v2 WHERE rowid IN
+        (SELECT rowid FROM provider_metadata_v2
+         ORDER BY last_accessed_at ASC LIMIT 1)
+      ''');
+      if (removed == 0) break;
+    }
   }
 
   Future<int> getMaxCacheSizeBytes() async {
@@ -292,10 +378,11 @@ class MetadataCache {
 
   /// Supprime tout le cache
   Future<void> clearAllCache() async {
-    final db = await _database.database;
+    final db = await _snapshotDatabase();
     await db.delete('media_metadata');
     await db.delete('season_metadata');
     await db.delete('episode_metadata');
+    await db.delete('provider_metadata_v2');
   }
 
   /// Vérifie si une entrée est en cache et non expirée

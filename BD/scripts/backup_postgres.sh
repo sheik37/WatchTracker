@@ -7,25 +7,24 @@ ENV_FILE="$BASE_DIR/.env"
 COMMON_SH_FILE="$COMMON_DIR/common.sh"
 COMMON_SECRETS_FILE="${COMMON_SECRETS_FILE:-$COMMON_DIR/.secrets}"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE"
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-if [ -f "$COMMON_SECRETS_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$COMMON_SECRETS_FILE"
-fi
-
 if [ -f "$COMMON_SH_FILE" ]; then
   # shellcheck disable=SC1090
   . "$COMMON_SH_FILE"
 else
   log_info() { echo "[INFO] $1"; }
   log_error() { echo "[ERROR] $1" >&2; }
+  wt_load_env() {
+    [ -f "$1" ] || { echo "Missing $1" >&2; exit 1; }
+    # shellcheck disable=SC1090
+    . "$1"
+    if [ -n "${2:-}" ] && [ -f "$2" ]; then
+      # shellcheck disable=SC1090
+      . "$2"
+    fi
+  }
 fi
+
+wt_load_env "$ENV_FILE" "$COMMON_SECRETS_FILE"
 
 : "${POSTGRES_USER:?POSTGRES_USER is required in BD/.env}"
 : "${POSTGRES_DB:?POSTGRES_DB is required in BD/.env}"
@@ -43,19 +42,17 @@ fail() {
 mkdir -p "$BACKUP_DIR"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-TMP_SQL="$BACKUP_DIR/.watchtracker_${TIMESTAMP}.sql"
+TMP_SQL="$(mktemp "$BACKUP_DIR/.watchtracker_${TIMESTAMP}_XXXXXX")" || fail "Cannot create temporary dump file in $BACKUP_DIR."
+trap 'rm -f "$TMP_SQL"' EXIT
 BACKUP_FILE="$BACKUP_DIR/watchtracker_${TIMESTAMP}.sql.gz"
 
 if ! docker exec "$CONTAINER_NAME" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists > "$TMP_SQL"; then
-  rm -f "$TMP_SQL"
   fail "PostgreSQL dump failed (container=$CONTAINER_NAME db=$POSTGRES_DB)."
 fi
 
 if ! gzip -c "$TMP_SQL" > "$BACKUP_FILE"; then
-  rm -f "$TMP_SQL"
   fail "Gzip compression failed for backup file."
 fi
-rm -f "$TMP_SQL"
 
 if ! find "$BACKUP_DIR" -type f -name "watchtracker_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete; then
   log_error "Retention cleanup failed for $BACKUP_DIR."

@@ -13,140 +13,16 @@ class WatchTrackerDatabase {
       path.join(dbPath, 'watchtracker.db'),
       version: 7,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE watchlist(
-            id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            poster_path TEXT,
-            media_type TEXT NOT NULL,
-            content_category TEXT NOT NULL,
-            content_status TEXT NOT NULL,
-            total_episodes INTEGER NOT NULL DEFAULT 0,
-            added_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY(id, media_type, content_category)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE episode_progress(
-            media_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            episode_number INTEGER NOT NULL,
-            is_watched INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            sync_updated_at INTEGER NOT NULL,
-            PRIMARY KEY(media_id, season_number, episode_number)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE episode_watch_events(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            episode_number INTEGER NOT NULL,
-            watched_at INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE movie_watch_events(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL,
-            watched_at INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE watchlist_tombstones(
-            id INTEGER NOT NULL,
-            media_type TEXT NOT NULL,
-            content_category TEXT NOT NULL,
-            deleted_at INTEGER NOT NULL,
-            PRIMARY KEY(id, media_type, content_category)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE episode_progress_tombstones(
-            media_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            episode_number INTEGER NOT NULL,
-            deleted_at INTEGER NOT NULL,
-            PRIMARY KEY(media_id, season_number, episode_number)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE sync_state(
-            key TEXT PRIMARY KEY,
-            value INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE media_metadata(
-            id INTEGER NOT NULL,
-            media_type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            overview TEXT,
-            poster_path TEXT,
-            backdrop_path TEXT,
-            release_date TEXT,
-            vote_average REAL,
-            genres TEXT,
-            tv_status TEXT,
-            cached_at INTEGER NOT NULL,
-            last_accessed_at INTEGER NOT NULL,
-            PRIMARY KEY(id, media_type)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE season_metadata(
-            media_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            id INTEGER,
-            name TEXT,
-            episode_count INTEGER,
-            cached_at INTEGER NOT NULL,
-            last_accessed_at INTEGER NOT NULL,
-            PRIMARY KEY(media_id, season_number)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE episode_metadata(
-            media_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            episode_number INTEGER NOT NULL,
-            id INTEGER,
-            name TEXT,
-            overview TEXT,
-            still_path TEXT,
-            air_date TEXT,
-            runtime INTEGER,
-            cached_at INTEGER NOT NULL,
-            last_accessed_at INTEGER NOT NULL,
-            PRIMARY KEY(media_id, season_number, episode_number)
-          )
-        ''');
-        await db.execute(
-          'CREATE INDEX idx_media_metadata_cached_at ON media_metadata(cached_at)',
-        );
-        await db.execute(
-          'CREATE INDEX idx_media_metadata_last_accessed ON media_metadata(last_accessed_at)',
-        );
-        await db.execute(
-          'CREATE INDEX idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
-        );
-        await db.execute('''
-          CREATE TABLE pending_actions(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action_type INTEGER NOT NULL,
-            payload TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            retry_count INTEGER NOT NULL DEFAULT 0,
-            last_retry_at INTEGER
-          )
-        ''');
-        await db.execute(
-          'CREATE INDEX idx_pending_actions_created ON pending_actions(created_at)',
-        );
+        await _createWatchlistTable(db);
+        await _createEpisodeProgressTable(db);
+        await _createEpisodeWatchEventsTable(db);
+        await _createMovieWatchEventsTable(db);
+        await _createWatchlistTombstonesTable(db);
+        await _createEpisodeProgressTombstonesTable(db);
+        await _createSyncStateTable(db);
+        await _createMetadataTables(db);
+        await _createMetadataIndexes(db);
+        await _createPendingActionsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -156,52 +32,15 @@ class WatchTrackerDatabase {
           await db.execute(
             'UPDATE watchlist SET updated_at = added_at WHERE updated_at IS NULL',
           );
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS watchlist_tombstones(
-              id INTEGER NOT NULL,
-              media_type TEXT NOT NULL,
-              content_category TEXT NOT NULL,
-              deleted_at INTEGER NOT NULL,
-              PRIMARY KEY(id, media_type, content_category)
-            )
-          ''');
+          await _createWatchlistTombstonesTable(db);
         }
         if (oldVersion < 3) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS episode_progress_tombstones(
-              media_id INTEGER NOT NULL,
-              season_number INTEGER NOT NULL,
-              episode_number INTEGER NOT NULL,
-              deleted_at INTEGER NOT NULL,
-              PRIMARY KEY(media_id, season_number, episode_number)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS sync_state(
-              key TEXT PRIMARY KEY,
-              value INTEGER NOT NULL
-            )
-          ''');
+          await _createEpisodeProgressTombstonesTable(db);
+          await _createSyncStateTable(db);
         }
         if (oldVersion < 4) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS episode_watch_events(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              media_id INTEGER NOT NULL,
-              season_number INTEGER NOT NULL,
-              episode_number INTEGER NOT NULL,
-              watched_at INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS movie_watch_events(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              media_id INTEGER NOT NULL,
-              watched_at INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-          ''');
+          await _createEpisodeWatchEventsTable(db);
+          await _createMovieWatchEventsTable(db);
 
           final watchedRows = await db.query(
             'episode_progress',
@@ -258,79 +97,195 @@ class WatchTrackerDatabase {
           );
         }
         if (oldVersion < 6) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS media_metadata(
-              id INTEGER NOT NULL,
-              media_type TEXT NOT NULL,
-              title TEXT NOT NULL,
-              overview TEXT,
-              poster_path TEXT,
-              backdrop_path TEXT,
-              release_date TEXT,
-              vote_average REAL,
-              genres TEXT,
-              tv_status TEXT,
-              cached_at INTEGER NOT NULL,
-              last_accessed_at INTEGER NOT NULL,
-              PRIMARY KEY(id, media_type)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS season_metadata(
-              media_id INTEGER NOT NULL,
-              season_number INTEGER NOT NULL,
-              id INTEGER,
-              name TEXT,
-              episode_count INTEGER,
-              cached_at INTEGER NOT NULL,
-              last_accessed_at INTEGER NOT NULL,
-              PRIMARY KEY(media_id, season_number)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS episode_metadata(
-              media_id INTEGER NOT NULL,
-              season_number INTEGER NOT NULL,
-              episode_number INTEGER NOT NULL,
-              id INTEGER,
-              name TEXT,
-              overview TEXT,
-              still_path TEXT,
-              air_date TEXT,
-              runtime INTEGER,
-              cached_at INTEGER NOT NULL,
-              last_accessed_at INTEGER NOT NULL,
-              PRIMARY KEY(media_id, season_number, episode_number)
-            )
-          ''');
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_media_metadata_cached_at ON media_metadata(cached_at)',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_media_metadata_last_accessed ON media_metadata(last_accessed_at)',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
-          );
+          await _createMetadataTables(db);
+          await _createMetadataIndexes(db);
         }
         if (oldVersion < 7) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS pending_actions(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              action_type INTEGER NOT NULL,
-              payload TEXT NOT NULL,
-              created_at INTEGER NOT NULL,
-              retry_count INTEGER NOT NULL DEFAULT 0,
-              last_retry_at INTEGER
-            )
-          ''');
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_pending_actions_created ON pending_actions(created_at)',
-          );
+          await _createPendingActionsTable(db);
         }
       },
     );
     return _db!;
+  }
+
+  /// Ferme la connexion à la base de données si elle est ouverte.
+  ///
+  /// Un prochain accès via [database] rouvrira automatiquement une nouvelle
+  /// connexion.
+  Future<void> close() async {
+    final db = _db;
+    if (db == null) return;
+    _db = null;
+    await db.close();
+  }
+
+  Future<void> _createWatchlistTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS watchlist(
+        id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        poster_path TEXT,
+        media_type TEXT NOT NULL,
+        content_category TEXT NOT NULL,
+        content_status TEXT NOT NULL,
+        total_episodes INTEGER NOT NULL DEFAULT 0,
+        added_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(id, media_type, content_category)
+      )
+    ''');
+  }
+
+  Future<void> _createEpisodeProgressTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS episode_progress(
+        media_id INTEGER NOT NULL,
+        season_number INTEGER NOT NULL,
+        episode_number INTEGER NOT NULL,
+        is_watched INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        sync_updated_at INTEGER NOT NULL,
+        PRIMARY KEY(media_id, season_number, episode_number)
+      )
+    ''');
+  }
+
+  Future<void> _createEpisodeWatchEventsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS episode_watch_events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        season_number INTEGER NOT NULL,
+        episode_number INTEGER NOT NULL,
+        watched_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createMovieWatchEventsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS movie_watch_events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        watched_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createWatchlistTombstonesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS watchlist_tombstones(
+        id INTEGER NOT NULL,
+        media_type TEXT NOT NULL,
+        content_category TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL,
+        PRIMARY KEY(id, media_type, content_category)
+      )
+    ''');
+  }
+
+  Future<void> _createEpisodeProgressTombstonesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS episode_progress_tombstones(
+        media_id INTEGER NOT NULL,
+        season_number INTEGER NOT NULL,
+        episode_number INTEGER NOT NULL,
+        deleted_at INTEGER NOT NULL,
+        PRIMARY KEY(media_id, season_number, episode_number)
+      )
+    ''');
+  }
+
+  Future<void> _createSyncStateTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_state(
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  /// Crée les tables de cache de métadonnées (média/saison/épisode).
+  /// Idempotent : peut être appelée aussi bien depuis `onCreate` que depuis
+  /// `onUpgrade`.
+  Future<void> _createMetadataTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS media_metadata(
+        id INTEGER NOT NULL,
+        media_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        overview TEXT,
+        poster_path TEXT,
+        backdrop_path TEXT,
+        release_date TEXT,
+        vote_average REAL,
+        genres TEXT,
+        tv_status TEXT,
+        cached_at INTEGER NOT NULL,
+        last_accessed_at INTEGER NOT NULL,
+        PRIMARY KEY(id, media_type)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS season_metadata(
+        media_id INTEGER NOT NULL,
+        season_number INTEGER NOT NULL,
+        id INTEGER,
+        name TEXT,
+        episode_count INTEGER,
+        cached_at INTEGER NOT NULL,
+        last_accessed_at INTEGER NOT NULL,
+        PRIMARY KEY(media_id, season_number)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS episode_metadata(
+        media_id INTEGER NOT NULL,
+        season_number INTEGER NOT NULL,
+        episode_number INTEGER NOT NULL,
+        id INTEGER,
+        name TEXT,
+        overview TEXT,
+        still_path TEXT,
+        air_date TEXT,
+        runtime INTEGER,
+        cached_at INTEGER NOT NULL,
+        last_accessed_at INTEGER NOT NULL,
+        PRIMARY KEY(media_id, season_number, episode_number)
+      )
+    ''');
+  }
+
+  /// Crée les index associés aux tables de cache de métadonnées. Idempotent,
+  /// utilisée par `onCreate` et `onUpgrade`.
+  Future<void> _createMetadataIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_media_metadata_cached_at ON media_metadata(cached_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_media_metadata_last_accessed ON media_metadata(last_accessed_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_episode_metadata_cached_at ON episode_metadata(cached_at)',
+    );
+  }
+
+  Future<void> _createPendingActionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_actions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_type INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_retry_at INTEGER
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pending_actions_created ON pending_actions(created_at)',
+    );
   }
 
   Future<void> addToWatchlist({

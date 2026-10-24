@@ -7,6 +7,22 @@ Variables backend/TMDB :
 - `BACKEND_BASE_URL` : URL de l'API backend (ex: `http://10.0.2.2:8000`).
 - `TMDB_API_KEY` : clé API TMDB utilisée pour la recherche/détails médias.
 
+## Sources des saisons et épisodes
+
+- Films et séries : découpage et informations TMDB uniquement.
+- Animés : saisons et numéros TVDB, mais nom, résumé, illustration, date et
+  durée des épisodes exclusivement TMDB. L'association suit l'ordre global :
+  TVDB S2E1 peut correspondre à TMDB S1E25. Les spéciaux (saison 0) sont
+  associés séparément et ne décalent jamais les épisodes réguliers.
+- Seules les saisons TMDB intersectant la saison TVDB demandée sont chargées.
+  Un épisode TMDB absent conserve son numéro TVDB avec un libellé explicite,
+  sans reprendre les informations d'un autre épisode.
+- Le cache hors ligne est versionné par fournisseur ; les anciens caches sans
+  source ne sont pas réutilisés pour ces saisons/épisodes (la progression et
+  la watchlist restent intactes). En cas d'indisponibilité TVDB, son découpage
+  en cache est privilégié ; sans découpage TVDB utilisable, repli TMDB avec
+  diagnostic `MediaRepository`.
+
 ## Mises à jour hors store
 
 L'app supporte maintenant une vérification de mises à jour côté **Profil > À propos**.

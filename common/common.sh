@@ -91,3 +91,77 @@ die() {
     log_error "$1"
     exit 1
 }
+
+# Charge un fichier d'environnement obligatoire ($1) puis un fichier de
+# secrets optionnel ($2). Factorise le bootstrap duplique en haut des
+# scripts BD/scripts/*.sh (backup/restore/daily_ops).
+wt_load_env() {
+    ENV_FILE_TO_LOAD="$1"
+    SECRETS_FILE_TO_LOAD="${2:-}"
+
+    if [ ! -f "$ENV_FILE_TO_LOAD" ]; then
+        echo "Missing $ENV_FILE_TO_LOAD" >&2
+        exit 1
+    fi
+
+    # shellcheck disable=SC1090
+    . "$ENV_FILE_TO_LOAD"
+
+    if [ -n "$SECRETS_FILE_TO_LOAD" ] && [ -f "$SECRETS_FILE_TO_LOAD" ]; then
+        # shellcheck disable=SC1090
+        . "$SECRETS_FILE_TO_LOAD"
+    fi
+}
+
+# Indique si un conteneur docker est en cours d'execution, avec une
+# nouvelle tentative apres un delai (utile pour ignorer un redemarrage
+# bref). Renvoie 0 si en cours d'execution immediatement, 2 si en cours
+# d'execution seulement apres le delai (ex: en cours de redemarrage),
+# 1 s'il reste arrete.
+container_is_running() {
+    CONTAINER_NAME_TO_CHECK="$1"
+    RETRY_DELAY_SECONDS="${2:-0}"
+
+    if docker inspect -f "{{.State.Running}}" "$CONTAINER_NAME_TO_CHECK" 2>/dev/null | grep -q true; then
+        return 0
+    fi
+
+    if [ "$RETRY_DELAY_SECONDS" -le 0 ] 2>/dev/null; then
+        return 1
+    fi
+
+    sleep "$RETRY_DELAY_SECONDS"
+
+    if docker inspect -f "{{.State.Running}}" "$CONTAINER_NAME_TO_CHECK" 2>/dev/null | grep -q true; then
+        return 2
+    fi
+
+    return 1
+}
+
+# Mecanisme simple d'anti-repetition d'alerte base sur un fichier d'etat.
+# wt_alert_should_fire <id> renvoie 0 (vrai) la premiere fois qu'un incident
+# identifie par <id> est detecte (et marque l'etat comme actif), puis 1
+# tant que l'incident persiste, pour eviter de spammer Discord a chaque
+# execution cron. wt_alert_clear <id> doit etre appelee quand l'incident
+# est resolu pour reactiver l'alerte au prochain incident.
+wt_alert_should_fire() {
+    ALERT_ID="$1"
+    ALERT_STATE_DIR="${WATCHTRACKER_ALERT_STATE_DIR:-${TMPDIR:-/tmp}}"
+    ALERT_STATE_FILE="$ALERT_STATE_DIR/watchtracker_alert_$ALERT_ID"
+
+    mkdir -p "$ALERT_STATE_DIR" 2>/dev/null || true
+
+    if [ -f "$ALERT_STATE_FILE" ]; then
+        return 1
+    fi
+
+    : > "$ALERT_STATE_FILE" 2>/dev/null || true
+    return 0
+}
+
+wt_alert_clear() {
+    ALERT_ID="$1"
+    ALERT_STATE_DIR="${WATCHTRACKER_ALERT_STATE_DIR:-${TMPDIR:-/tmp}}"
+    rm -f "$ALERT_STATE_DIR/watchtracker_alert_$ALERT_ID" 2>/dev/null || true
+}

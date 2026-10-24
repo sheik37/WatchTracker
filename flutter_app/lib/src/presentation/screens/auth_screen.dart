@@ -1,7 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../core/cooldown_controller.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
@@ -52,7 +52,9 @@ class _AuthScreenState extends State<AuthScreen> {
   final _otpCtrl = TextEditingController();
   bool _isRegisterMode = false;
   bool _showPassword = false;
-  Timer? _countdownTicker;
+  final _retryCooldown = CooldownController();
+  final _resendCooldown = CooldownController();
+  final _forgotCooldown = CooldownController();
   _PasswordValidation _passwordValidation = const _PasswordValidation();
 
   bool get _hasMinLength => _passwordValidation.hasMinLength;
@@ -70,9 +72,9 @@ class _AuthScreenState extends State<AuthScreen> {
   bool get _shouldShowOtp =>
       !_isRegisterMode && (widget.showOtpCodeField || _isAdminTarget);
 
-  int get _retryAfterSeconds => _remainingSeconds(widget.retryUntilMillis);
-  int get _resendCooldown => _remainingSeconds(widget.resendUntilMillis);
-  int get _forgotCooldown => _remainingSeconds(widget.forgotUntilMillis);
+  int get _retryAfterSeconds => _retryCooldown.remainingSeconds;
+  int get _resendCooldownSeconds => _resendCooldown.remainingSeconds;
+  int get _forgotCooldownSeconds => _forgotCooldown.remainingSeconds;
 
   bool get _isRateLimited => _retryAfterSeconds > 0;
 
@@ -90,69 +92,40 @@ class _AuthScreenState extends State<AuthScreen> {
       _emailCtrl.text.contains('@') &&
       !widget.isLoading &&
       !_isRateLimited &&
-      _resendCooldown <= 0;
+      _resendCooldownSeconds <= 0;
 
   bool get _canForgot =>
       !_isRegisterMode &&
       _emailCtrl.text.contains('@') &&
       !widget.isLoading &&
       !_isRateLimited &&
-      _forgotCooldown <= 0;
+      _forgotCooldownSeconds <= 0;
 
   @override
   void initState() {
     super.initState();
-    _refreshCountdownTicker();
+    _retryCooldown.updateDeadline(widget.retryUntilMillis);
+    _resendCooldown.updateDeadline(widget.resendUntilMillis);
+    _forgotCooldown.updateDeadline(widget.forgotUntilMillis);
   }
 
   @override
   void didUpdateWidget(covariant AuthScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.retryUntilMillis != widget.retryUntilMillis ||
-        oldWidget.resendUntilMillis != widget.resendUntilMillis ||
-        oldWidget.forgotUntilMillis != widget.forgotUntilMillis) {
-      _refreshCountdownTicker();
-    }
+    _retryCooldown.updateDeadline(widget.retryUntilMillis);
+    _resendCooldown.updateDeadline(widget.resendUntilMillis);
+    _forgotCooldown.updateDeadline(widget.forgotUntilMillis);
   }
 
   @override
   void dispose() {
-    _countdownTicker?.cancel();
+    _retryCooldown.dispose();
+    _resendCooldown.dispose();
+    _forgotCooldown.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _otpCtrl.dispose();
     super.dispose();
-  }
-
-  void _refreshCountdownTicker() {
-    _countdownTicker?.cancel();
-    if (!_hasActiveCountdown) return;
-    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (!_hasActiveCountdown) {
-        timer.cancel();
-      }
-      setState(() {});
-    });
-  }
-
-  bool get _hasActiveCountdown =>
-      _isFutureDeadline(widget.retryUntilMillis) ||
-      _isFutureDeadline(widget.resendUntilMillis) ||
-      _isFutureDeadline(widget.forgotUntilMillis);
-
-  bool _isFutureDeadline(int? untilMillis) =>
-      untilMillis != null &&
-      untilMillis > DateTime.now().millisecondsSinceEpoch;
-
-  int _remainingSeconds(int? untilMillis) {
-    if (untilMillis == null) return 0;
-    final remainingMillis = untilMillis - DateTime.now().millisecondsSinceEpoch;
-    if (remainingMillis <= 0) return 0;
-    return (remainingMillis / 1000).ceil();
   }
 
   void _handlePasswordChanged(String value) {
@@ -348,64 +321,78 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                       ),
                     ],
-                    if (_isRateLimited) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Trop de tentatives. Réessaie dans ${_retryAfterSeconds}s.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    ] else if (widget.attemptsRemaining != null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Tentatives restantes avant blocage : ${widget.attemptsRemaining}',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _canSubmit ? _submit : null,
-                        child: widget.isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
+                    AnimatedBuilder(
+                      animation: _retryCooldown,
+                      builder: (context, _) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          if (_isRateLimited) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Trop de tentatives. Réessaie dans ${_retryAfterSeconds}s.',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
                                 ),
-                              )
-                            : Text(
-                                _isRegisterMode
-                                    ? 'Créer un compte'
-                                    : 'Se connecter',
                               ),
+                            ),
+                          ] else if (widget.attemptsRemaining != null) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Tentatives restantes avant blocage : ${widget.attemptsRemaining}',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _canSubmit ? _submit : null,
+                              child: widget.isLoading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      _isRegisterMode
+                                          ? 'Créer un compte'
+                                          : 'Se connecter',
+                                    ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     if (!_isRegisterMode) ...[
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton(
-                          onPressed: _canForgot
-                              ? () => widget.onForgotPassword(
-                                  _emailCtrl.text.trim(),
-                                )
-                              : null,
-                          child: Text(
-                            _forgotCooldown > 0
-                                ? 'Mot de passe oublié (${_forgotCooldown}s)'
-                                : 'Mot de passe oublié',
+                        child: AnimatedBuilder(
+                          animation: Listenable.merge([
+                            _retryCooldown,
+                            _forgotCooldown,
+                          ]),
+                          builder: (context, _) => OutlinedButton(
+                            onPressed: _canForgot
+                                ? () => widget.onForgotPassword(
+                                    _emailCtrl.text.trim(),
+                                  )
+                                : null,
+                            child: Text(
+                              _forgotCooldownSeconds > 0
+                                  ? 'Mot de passe oublié (${_forgotCooldownSeconds}s)'
+                                  : 'Mot de passe oublié',
+                            ),
                           ),
                         ),
                       ),
@@ -414,16 +401,22 @@ class _AuthScreenState extends State<AuthScreen> {
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton(
-                          onPressed: _canResend
-                              ? () => widget.onResendVerification(
-                                  _emailCtrl.text.trim(),
-                                )
-                              : null,
-                          child: Text(
-                            _resendCooldown > 0
-                                ? 'Renvoyer l\'email (${_resendCooldown}s)'
-                                : 'Renvoyer l\'email de vérification',
+                        child: AnimatedBuilder(
+                          animation: Listenable.merge([
+                            _retryCooldown,
+                            _resendCooldown,
+                          ]),
+                          builder: (context, _) => OutlinedButton(
+                            onPressed: _canResend
+                                ? () => widget.onResendVerification(
+                                    _emailCtrl.text.trim(),
+                                  )
+                                : null,
+                            child: Text(
+                              _resendCooldownSeconds > 0
+                                  ? 'Renvoyer l\'email (${_resendCooldownSeconds}s)'
+                                  : 'Renvoyer l\'email de vérification',
+                            ),
                           ),
                         ),
                       ),

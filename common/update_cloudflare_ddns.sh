@@ -58,8 +58,14 @@ if ! printf '%s' "$LOOKUP_JSON" | grep -q '"success":true'; then
   exit 1
 fi
 
-RECORD_ID="$(printf '%s' "$LOOKUP_JSON" | sed -n 's/.*"result":\[{"id":"\([^"]*\)".*/\1/p')"
-CURRENT_CONTENT="$(printf '%s' "$LOOKUP_JSON" | sed -n 's/.*"content":"\([^"]*\)".*/\1/p')"
+if command -v jq >/dev/null 2>&1; then
+  RECORD_ID="$(printf '%s' "$LOOKUP_JSON" | jq -r '.result[0].id // empty')"
+  CURRENT_CONTENT="$(printf '%s' "$LOOKUP_JSON" | jq -r '.result[0].content // empty')"
+else
+  # Repli sed/grep si jq n'est pas disponible sur le NAS.
+  RECORD_ID="$(printf '%s' "$LOOKUP_JSON" | sed -n 's/.*"result":\[{"id":"\([^"]*\)".*/\1/p')"
+  CURRENT_CONTENT="$(printf '%s' "$LOOKUP_JSON" | sed -n 's/.*"content":"\([^"]*\)".*/\1/p')"
+fi
 
 if [ -z "$RECORD_ID" ]; then
   CREATE_URL="https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records"
